@@ -549,3 +549,63 @@ describe('Confirmed Add temporal and separate-field amendments', () => {
     ).rejects.toMatchObject({ status: 400, fields: { preparationNotes: expect.any(String) } });
   });
 });
+
+describe('meeting edit pre-read scope', () => {
+  it.each([
+    ['edit', { title: 'Changed' }],
+    ['team', { addMemberIds: [attendee], removeEmails: [] }],
+    ['cancel', {}],
+  ] as const)('delegates %s directly to the guarded mutation', async (operation, change) => {
+    const { model, service } = meetingHarness();
+    model.mutate.mockResolvedValue(stored);
+    expect(
+      await service.editMeeting(
+        user,
+        stored.id,
+        { expectedUpdatedAt: stored.updatedAt, ...change },
+        operation,
+      ),
+    ).toEqual({ meeting: stored });
+    expect(model.findById).not.toHaveBeenCalled();
+    expect(model.mutate).toHaveBeenCalledWith(
+      memberId,
+      stored.id,
+      expect.objectContaining({ expectedUpdatedAt: stored.updatedAt }),
+    );
+  });
+  it.each(['https://example.test/join'])(
+    'preserves online format prevalidation for joinUrl %s',
+    async (joinUrl) => {
+      const { model, service } = meetingHarness();
+      await expect(
+        service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(model.mutate).not.toHaveBeenCalled();
+      model.findById.mockResolvedValue(null);
+      await expect(
+        service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl }),
+      ).rejects.toMatchObject({ code: 'MEETING_NOT_FOUND', status: 404 });
+      model.findById.mockResolvedValue({ ...stored, format: 'ONLINE' } as never);
+      model.mutate.mockResolvedValue(stored);
+      await service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl });
+      expect(model.mutate).toHaveBeenCalledWith(memberId, stored.id, {
+        expectedUpdatedAt: stored.updatedAt,
+        joinUrl,
+      });
+    },
+  );
+  it('propagates guarded mutation authorization and stale-version failures without a pre-read', async () => {
+    const { model, service } = meetingHarness();
+    for (const code of ['MEETING_NOT_FOUND', 'MEETING_CHANGED']) {
+      const error = new Error(code);
+      model.mutate.mockRejectedValue(error);
+      await expect(
+        service.editMeeting(user, stored.id, {
+          expectedUpdatedAt: stored.updatedAt,
+          title: 'Changed',
+        }),
+      ).rejects.toBe(error);
+    }
+    expect(model.findById).not.toHaveBeenCalled();
+  });
+});

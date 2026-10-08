@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import type { Config } from '../src/config/env.js';
-import type { Member } from '../src/models/auth.model.js';
+import type { Member, PrincipalLookup } from '../src/models/auth.model.js';
 import { AuthService } from '../src/services/auth.service.js';
 import { TokenService } from '../src/services/token.service.js';
 import { OAuthTransactions } from '../src/services/oauth-transaction.service.js';
@@ -43,8 +43,17 @@ export async function harness(now: () => number = Date.now) {
   const candidates = new Set<string>();
   const model = {
     findByEmail: vi.fn(async (email: string) => members.get(email) ?? null),
-    findById: vi.fn(async (id: string) => [...members.values()].find((m) => m.id === id) ?? null),
-    checkCandidate: vi.fn(async (email: string) => candidates.has(email)),
+    findPrincipal: vi.fn(
+      async (column: 'id' | 'email', value: string): Promise<PrincipalLookup> => {
+        const member = [...members.values()].find((m) => m[column] === value);
+        return {
+          member: member
+            ? { id: member.id, email: member.email, display_name: member.display_name }
+            : null,
+          candidateDenied: candidates.has(column === 'email' ? value : (member?.email ?? '')),
+        };
+      },
+    ),
     checkReady: vi.fn(async () => {}),
   };
   const google = {
