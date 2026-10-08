@@ -81,12 +81,6 @@ erDiagram
     uuid create_request_id PK
     uuid meeting_id UK "ข้อมูลอ้างอิง ไม่ใช่ FK"
   }
-  local_demo_seed_runs {
-    text dataset_key PK
-    text fixture_version
-    text manifest_sha256
-    timestamptz applied_at
-  }
   pgmigrations {
     int id PK
     varchar name
