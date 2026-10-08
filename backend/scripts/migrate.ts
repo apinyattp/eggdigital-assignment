@@ -6,6 +6,7 @@ export async function migrate(databaseUrl: string) {
     databaseUrl: requireLocalDatabase(databaseUrl),
     dir: fileURLToPath(new URL('../migrations', import.meta.url)),
     direction: 'up',
+    singleTransaction: true,
     migrationsTable: 'pgmigrations',
     log: () => {},
     verbose: false,

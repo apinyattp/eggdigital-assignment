@@ -21,9 +21,6 @@ export const passwordBody = z
   })
   .strict();
 export const emptyBody = z.object({}).strict();
-export const exchangeBody = z
-  .object({ code: z.string().min(1).max(8192), state: z.string().min(1).max(256) })
-  .strict();
 export const internalIssueBody = z.discriminatedUnion('method', [
   passwordBody.extend({ method: z.literal('password') }),
   z.object({ method: z.literal('google'), idToken: z.string().min(1).max(8192) }).strict(),

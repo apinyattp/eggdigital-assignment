@@ -1,6 +1,7 @@
 import { beforeEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { harness, config, password, cookie, memberId } from './support.js';
+import { createApp } from '../src/app.js';
 import { ApiError } from '../src/utils/api-error.js';
 let h: Awaited<ReturnType<typeof harness>>;
 beforeEach(async () => {
@@ -58,9 +59,7 @@ describe('LOGIN r3 legacy retirement and retained L4/L5', () => {
       expect(r.headers['set-cookie']).toBeUndefined();
       expect(h.model.findByEmail).not.toHaveBeenCalled();
       expect(h.model.findPrincipal).not.toHaveBeenCalled();
-      expect(h.google.exchange).not.toHaveBeenCalled();
       expect(h.google.verifyIdToken).not.toHaveBeenCalled();
-      expect(h.google.authorizationUrl).not.toHaveBeenCalled();
     },
   );
   it('TEST-MM-008/010/011 issuer token works at unchanged L4; L5 clears both cookie paths', async () => {
@@ -234,16 +233,33 @@ describe('LOGIN r3 legacy retirement and retained L4/L5', () => {
         (await request(h.app).get('/api/v1/auth/session').set('Cookie', access(x))).status,
       ).toBe(200);
   });
-  it('TEST-MM-026 retains legacy transaction cancellation through logout', async () => {
-    const started = h.transactions.start(undefined);
-    const entry = h.transactions.consume(started.binding, started.entry.state);
-    expect(
-      (
-        await post('/logout')
-          .set('Cookie', 'mm_google_tx=' + started.binding)
-          .send({})
-      ).status,
-    ).toBe(204);
-    expect(() => h.transactions.complete(entry)).toThrow('AUTH_ATTEMPT_CANCELLED');
+  it('clears legacy and access cookies with secure attributes without auth dependencies', async () => {
+    const secureConfig = {
+      ...config,
+      allowedOrigin: 'https://app.example.test',
+      secureCookies: true,
+    };
+    const app = createApp(secureConfig, h.auth, h.model, h.memberService, h.meetingService);
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Origin', secureConfig.allowedOrigin)
+      .set('X-Requested-With', 'MeetingManager')
+      .set('Cookie', 'mm_google_tx=legacy-binding; mm_access=invalid')
+      .send({});
+    expect(response.status).toBe(204);
+    const headers = response.headers['set-cookie'] as unknown as string[];
+    expect(headers).toHaveLength(2);
+    expect(headers.find((s) => s.startsWith('mm_access='))).toContain('Path=/api;');
+    expect(headers.find((s) => s.startsWith('mm_google_tx='))).toContain('Path=/api/v1/auth;');
+    for (const header of headers) {
+      expect(header).toContain('Max-Age=0');
+      expect(header).toContain('HttpOnly');
+      expect(header).toContain('SameSite=Lax');
+      expect(header).toContain('Secure');
+      expect(header).not.toContain('Domain=');
+    }
+    expect(h.model.findPrincipal).not.toHaveBeenCalled();
+    expect(h.model.findByEmail).not.toHaveBeenCalled();
+    expect(h.google.verifyIdToken).not.toHaveBeenCalled();
   });
 });

@@ -23,13 +23,6 @@ const databaseUrl = requireLocalDatabase(process.env.TEST_DATABASE_URL, true);
 const pool = new Pool({ connectionString: databaseUrl, max: 6 });
 const tokens = new TokenService(config);
 const provider = {
-  checkAvailable() {},
-  authorizationUrl() {
-    return '';
-  },
-  async exchange() {
-    throw new Error('No provider calls');
-  },
   async verifyIdToken() {
     throw new Error('No provider calls');
   },
@@ -41,7 +34,6 @@ const service = new MeetingService(model, () => new Date(currentTime));
 const app = createApp(
   config,
   new AuthService(authModel, tokens, provider, 'unused'),
-  provider,
   authModel,
   new MemberService(new MemberModel(pool)),
   service,
@@ -109,7 +101,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   currentTime = '2026-10-08T03:00:00.000Z';
   await pool.query(
-    'TRUNCATE meeting_provider_cleanup,meeting_calendar_links,meeting_provider_operations,provider_connections,interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
+    'TRUNCATE interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
   );
   await seedLoginFixtures(pool, password);
 });

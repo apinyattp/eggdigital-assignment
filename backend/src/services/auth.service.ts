@@ -13,7 +13,7 @@ export class AuthService {
   constructor(
     private model: Pick<AuthModel, 'findByEmail' | 'findPrincipal'>,
     private tokens: TokenService,
-    private google: Pick<GoogleIdentityService, 'exchange' | 'verifyIdToken'>,
+    private google: Pick<GoogleIdentityService, 'verifyIdToken'>,
     private dummyHash: string,
   ) {}
   async findPrincipal(identity: Identity, missingMemberStatus: 401 | 404 = 401): Promise<UserView> {
@@ -49,16 +49,6 @@ export class AuthService {
     if (!member?.password_hash || !verified) throw new ApiError(401, 'INVALID_CREDENTIALS');
     const identity: Identity = { authMethod: 'password', subject: member.id };
     const user = await this.findPrincipal(identity);
-    return { ...(await this.tokens.issue(identity)), user };
-  }
-  async saveGoogleLogin(code: string, nonce: string) {
-    const google = await this.google.exchange(code, nonce);
-    const identity: Identity = {
-      authMethod: 'google',
-      subject: 'google:' + google.sub,
-      verifiedEmail: google.email,
-    };
-    const user = await this.findPrincipal(identity, 404);
     return { ...(await this.tokens.issue(identity)), user };
   }
   async findSession(token: string | undefined) {

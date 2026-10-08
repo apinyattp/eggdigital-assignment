@@ -1,60 +1,18 @@
 import { OAuth2Client } from 'google-auth-library';
 import { z } from 'zod';
-import type { Config } from '../../config/env.js';
 import { ApiError } from '../../utils/api-error.js';
 import { canonicalEmail } from '../../services/token.service.js';
 export type GoogleIdentity = { sub: string; email: string; displayName: string };
 export class GoogleIdentityService {
   private client: OAuth2Client | undefined;
   private audience: string | undefined;
-  constructor(
-    private config: Config['google'],
-    clientId = config?.clientId,
-  ) {
+  constructor(clientId?: string) {
     this.audience = clientId;
     if (clientId)
       this.client = new OAuth2Client({
         clientId,
-        clientSecret: config?.clientSecret,
-        redirectUri: config?.redirectUri,
         transporterOptions: { timeout: 10_000, retry: false },
       });
-  }
-  checkAvailable() {
-    if (!this.config || !this.client) throw new ApiError(503, 'GOOGLE_AUTH_UNAVAILABLE');
-  }
-  authorizationUrl(state: string, nonce: string): string {
-    this.checkAvailable();
-    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    url.search = new URLSearchParams({
-      client_id: this.config!.clientId,
-      redirect_uri: this.config!.redirectUri,
-      response_type: 'code',
-      scope: 'openid email profile',
-      state,
-      nonce,
-    }).toString();
-    return url.toString();
-  }
-  async exchange(code: string, nonce: string): Promise<GoogleIdentity> {
-    this.checkAvailable();
-    let idToken: string;
-    try {
-      const { tokens } = await this.client!.getToken({
-        code,
-        redirect_uri: this.config!.redirectUri,
-      });
-      if (!tokens.id_token) throw new ApiError(401, 'GOOGLE_IDENTITY_INVALID');
-      idToken = tokens.id_token;
-      // Provider access/refresh tokens are never installed as client credentials or persisted.
-    } catch (error) {
-      if (error instanceof ApiError) throw error;
-      const e = error as { response?: { status?: number; data?: { error?: string } } };
-      if (e.response?.data?.error === 'invalid_grant')
-        throw new ApiError(401, 'GOOGLE_IDENTITY_INVALID');
-      throw new ApiError(503, 'GOOGLE_AUTH_UNAVAILABLE');
-    }
-    return this.verifyIdToken(idToken, nonce);
   }
   async verifyIdToken(idToken: string, expectedNonce?: string): Promise<GoogleIdentity> {
     if (!this.client || !this.audience) throw new ApiError(503, 'GOOGLE_AUTH_UNAVAILABLE');

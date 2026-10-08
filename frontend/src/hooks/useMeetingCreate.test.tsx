@@ -52,8 +52,6 @@ const stored: Meeting = {
   status: "PENDING",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   createdAt: "2026-10-08T01:00:00.000001Z",
   updatedAt: "2026-10-08T01:00:00.000001Z",
 };
@@ -105,8 +103,6 @@ describe("Online create uses the existing owner-bound request state", () => {
     const saved: Meeting = {
       ...stored,
       format: "ONLINE",
-      meetingProvider: null,
-      externalMeetingId: null,
       joinUrl: online.joinUrl,
     };
     const service = api();

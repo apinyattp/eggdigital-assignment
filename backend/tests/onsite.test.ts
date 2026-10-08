@@ -35,8 +35,6 @@ const stored = {
   status: 'PENDING' as const,
   format: 'ONSITE' as const,
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [{ memberId: attendee, displayName: 'Sample 02', email: 'sample02@example.test' }],
   createdAt: '2026-10-08T00:00:00.000Z',
   updatedAt: '2026-10-08T00:00:00.000Z',

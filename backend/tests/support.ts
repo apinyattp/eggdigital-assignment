@@ -4,7 +4,6 @@ import type { Config } from '../src/config/env.js';
 import type { Member, PrincipalLookup } from '../src/models/auth.model.js';
 import { AuthService } from '../src/services/auth.service.js';
 import { TokenService } from '../src/services/token.service.js';
-import { OAuthTransactions } from '../src/services/oauth-transaction.service.js';
 import { createApp } from '../src/app.js';
 import { MemberService } from '../src/services/member.service.js';
 import { MeetingService } from '../src/services/meeting.service.js';
@@ -57,16 +56,6 @@ export async function harness(now: () => number = Date.now) {
     checkReady: vi.fn(async () => {}),
   };
   const google = {
-    checkAvailable: vi.fn(() => {}),
-    authorizationUrl: vi.fn(
-      (state: string, nonce: string) =>
-        `https://accounts.google.com/o/oauth2/v2/auth?state=${state}&nonce=${nonce}`,
-    ),
-    exchange: vi.fn(async (_code: string, _nonce: string) => ({
-      sub: '1234567890',
-      email: 'sample01@example.test',
-      displayName: 'Provider name',
-    })),
     verifyIdToken: vi.fn(async (_idToken: string) => ({
       sub: '1234567890',
       email: 'sample01@example.test',
@@ -74,7 +63,6 @@ export async function harness(now: () => number = Date.now) {
     })),
   };
   const tokens = new TokenService(config, now);
-  const transactions = new OAuthTransactions(now);
   const auth = new AuthService(model, tokens, google, hash);
   const memberModel = { readPage: vi.fn(async () => ({ items: [], total: 0 })) };
   const meetingModel = {
@@ -93,12 +81,11 @@ export async function harness(now: () => number = Date.now) {
   };
   const memberService = new MemberService(memberModel);
   const meetingService = new MeetingService(meetingModel, () => new Date('2026-10-08T03:00:00Z'));
-  const app = createApp(config, auth, google, model, memberService, meetingService, transactions);
+  const app = createApp(config, auth, model, memberService, meetingService);
   return {
     app,
     auth,
     tokens,
-    transactions,
     model,
     google,
     members,
