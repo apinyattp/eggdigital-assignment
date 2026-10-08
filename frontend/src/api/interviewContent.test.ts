@@ -20,7 +20,102 @@ function respond(value: unknown, status = 200) {
   return fetch;
 }
 describe("N1/N2/F1/F2/F3 transport — SA bcb893dd; mocked HTTP", () => {
-  it.each([undefined, -1, 0, 1.5, "2"])(
+  it.each([
+    ["legacy", 0],
+    ["legacy", 51],
+    ["current", 0],
+    ["current", 51],
+  ] as const)(
+    "normalizes %s feedback metadata with total %i on first and continuation pages",
+    async (format, total) => {
+      const totalPages = total === 0 ? 0 : 2;
+      const snapshot = "opaque+/=?";
+      for (const page of [1, 2]) {
+        const items =
+          total === 0
+            ? []
+            : page === 1
+              ? Array.from({ length: 50 }, (_, index) => ({
+                  ...item,
+                  id: `other-${index}`,
+                  isOwn: false,
+                }))
+              : [item];
+        const value = {
+          items,
+          ownFeedbackId: total === 0 ? null : item.id,
+          total,
+          page,
+          pageSize: 50,
+          asOf: version,
+          snapshot,
+        };
+        const fetch = respond({
+          ...value,
+          ...(format === "current" ? { totalPages } : {}),
+        });
+        expect(
+          await api.readFeedback(
+            "meeting",
+            page,
+            page === 1 ? undefined : snapshot,
+          ),
+        ).toEqual({ ...value, totalPages });
+        const query = new URL(fetch.mock.calls[0][0]).searchParams;
+        expect(query.get("page")).toBe(String(page));
+        expect(query.get("pageSize")).toBe("50");
+        expect(query.get("snapshot")).toBe(page === 1 ? null : snapshot);
+        expect(fetch).toHaveBeenCalledOnce();
+      }
+    },
+  );
+  it.each([{ total: -1 }, { page: 0 }, { pageSize: 25 }])(
+    "rejects invalid legacy feedback metadata %j instead of deriving a page count",
+    async (invalid) => {
+      respond({
+        items: [],
+        ownFeedbackId: null,
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        asOf: version,
+        snapshot: "snapshot",
+        ...invalid,
+      });
+      await expect(api.readFeedback("meeting")).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
+  it.each([undefined, ""])(
+    "still rejects missing legacy feedback snapshot %j",
+    async (snapshot) => {
+      respond({
+        items: [],
+        ownFeedbackId: null,
+        total: 0,
+        page: 2,
+        pageSize: 50,
+        asOf: version,
+        snapshot,
+      });
+      await expect(
+        api.readFeedback("meeting", 2, "request-snapshot"),
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE", status: 200 });
+    },
+  );
+  it.each([401, 403, 409])(
+    "preserves feedback continuation HTTP %i during rollout",
+    async (status) => {
+      const code = status === 409 ? "LIST_CHANGED" : "SAFE_ERROR";
+      const fetch = respond({ error: { code } }, status);
+      await expect(
+        api.readFeedback("meeting", 2, "request-snapshot"),
+      ).rejects.toMatchObject({ code, status });
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+  it.each([null, -1, 0, 1.5, "2"])(
     "rejects inconsistent feedback totalPages %j",
     async (totalPages) => {
       respond({

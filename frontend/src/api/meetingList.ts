@@ -61,7 +61,8 @@ function parseCurrentMeetingPage(
     value.pageSize !== 10 ||
     !Number.isSafeInteger(value.total) ||
     (value.total as number) < 0 ||
-    value.totalPages !== Math.ceil((value.total as number) / 10)
+    ("totalPages" in value &&
+      value.totalPages !== Math.ceil((value.total as number) / 10))
   ) {
     throw new MeetingError("INVALID_RESPONSE", status);
   }
@@ -75,7 +76,8 @@ function parseCurrentMeetingPage(
     page,
     pageSize: 10,
     total: result.count,
-    totalPages: value.totalPages as number,
+    totalPages:
+      (value.totalPages as number | undefined) ?? Math.ceil(result.count / 10),
   };
 }
 async function fetchValidatedMeetingListResponse(

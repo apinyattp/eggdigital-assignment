@@ -82,8 +82,7 @@ export const membersApi = {
       typeof value.total !== "number" ||
       !Number.isSafeInteger(value.total) ||
       value.total < 0 ||
-      !("totalPages" in value) ||
-      value.totalPages !== Math.ceil(value.total / 20) ||
+      ("totalPages" in value && value.totalPages !== Math.ceil(value.total / 20)) ||
       value.items.length > 20
     ) {
       throw new MemberLookupError("INVALID_RESPONSE");
@@ -108,7 +107,10 @@ export const membersApi = {
       page,
       pageSize: 20,
       total: value.total,
-      totalPages: value.totalPages as number,
+      totalPages:
+        "totalPages" in value
+          ? (value.totalPages as number)
+          : Math.ceil(value.total / 20),
     };
   },
 };
