@@ -31,8 +31,8 @@ vi.mock("./authController", () => ({
   },
   initialAuthSnapshot: {},
 }));
-import { useOnsiteForm } from "./useOnsiteForm";
-import { OnsiteForm } from "@/app/(main)/meetings/new/_components/OnsiteForm";
+import { useMeetingCreateForm } from "./useMeetingCreateForm";
+import { MeetingCreateForm } from "@/app/(main)/meetings/new/_components/MeetingCreateForm";
 const member = {
   id: "member",
   displayName: "Member One",
@@ -131,7 +131,7 @@ function chooseDate(label: string, day: number) {
 }
 async function fillPage() {
   await act(async () => {
-    render(<OnsiteForm />);
+    render(<MeetingCreateForm />);
   });
   chooseDate("Start date", 1);
   chooseDate("End date", 1);
@@ -289,7 +289,7 @@ describe("TQA-D01/D02 Add page recovery — mocked HTTP, real form/picker hooks"
   ] as AuthSnapshot[])(
     "discards full draft/team on confirmed account change or loss of access %s",
     async (next) => {
-      const { result } = renderHook(() => useOnsiteForm());
+      const { result } = renderHook(() => useMeetingCreateForm());
       act(() => {
         result.current.change("title", "Private draft");
         result.current.change("preparationNotes", "Private preparation");
@@ -330,7 +330,7 @@ describe("TQA-D01/D02 Add page recovery — mocked HTTP, real form/picker hooks"
 
 describe("latest human Add date rules", () => {
   it("starts blank and clears only an earlier End on committed Start changes", () => {
-    const { result } = renderHook(() => useOnsiteForm());
+    const { result } = renderHook(() => useMeetingCreateForm());
     expect(result.current.values.startDate).toBe("");
     expect(result.current.values.endDate).toBe("");
     act(() => {
@@ -347,7 +347,7 @@ describe("latest human Add date rules", () => {
     expect(result.current.errors).toEqual({});
   });
   it("keeps an End equal to or later than the selected Start", () => {
-    const { result } = renderHook(() => useOnsiteForm());
+    const { result } = renderHook(() => useMeetingCreateForm());
     act(() => {
       result.current.change("endDate", "2030-01-02");
       result.current.change("startDate", "2030-01-02");
@@ -358,7 +358,7 @@ describe("latest human Add date rules", () => {
   });
   it("does not toast on Start change; invalid Save shows one dismissible error toast and focuses first invalid field without POST", async () => {
     await act(async () => {
-      render(<OnsiteForm />);
+      render(<MeetingCreateForm />);
     });
     expect(screen.getByLabelText(/^Start date/)).toHaveValue("");
     expect(screen.getByLabelText(/^End date/)).toHaveValue("");
@@ -407,7 +407,7 @@ describe("latest human Add date rules", () => {
 // Human-confirmed strict future End and manual HTTPS rules, checked only on Save.
 describe("Add Save time/link boundaries at frozen Bangkok 2030-01-01 09:30", () => {
   async function draft() {
-    const hook = renderHook(() => useOnsiteForm());
+    const hook = renderHook(() => useMeetingCreateForm());
     await act(async () => {});
     act(() => {
       hook.result.current.change("candidateName", "Candidate");

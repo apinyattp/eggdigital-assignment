@@ -1,4 +1,4 @@
-import { OnsiteForm } from "./_components/OnsiteForm";
+import { MeetingCreateForm } from "./_components/MeetingCreateForm";
 export default function NewMeetingPage() {
-  return <OnsiteForm />;
+  return <MeetingCreateForm />;
 }
