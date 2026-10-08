@@ -153,13 +153,7 @@ export class MeetingModel {
         ],
       );
       const created = inserted.rows.length === 1;
-      if (created) {
-        for (const member of members)
-          await client.query(
-            'INSERT INTO meeting_attendees (meeting_id,email,display_name,member_id) VALUES ($1,$2,$3,$4)',
-            [inserted.rows[0]!.id, member.email, member.display_name, member.id],
-          );
-      }
+      if (created) await this.insertAttendees(client, inserted.rows[0]!.id, members);
       // The next READ COMMITTED statement sees a concurrent committed winner.
       const meeting = await this.find('create_request_id', creatorId, input.requestId, client);
       if (!meeting) throw unavailable();
@@ -739,11 +733,8 @@ export class MeetingModel {
           );
           changed = true;
         }
-        for (const m of additions) {
-          await client.query(
-            'INSERT INTO meeting_attendees(meeting_id,email,display_name,member_id) VALUES($1,$2,$3,$4)',
-            [meetingId, m.email, m.display_name, m.id],
-          );
+        if (additions.length) {
+          await this.insertAttendees(client, meetingId, additions);
           changed = true;
         }
       }
@@ -794,6 +785,24 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async insertAttendees(
+    client: PoolClient,
+    meetingId: string,
+    members: { id: string; email: string; display_name: string }[],
+  ): Promise<void> {
+    if (!members.length) return;
+    await client.query(
+      `INSERT INTO meeting_attendees (meeting_id,email,display_name,member_id)
+       SELECT $1,email,display_name,member_id
+       FROM unnest($2::text[],$3::text[],$4::uuid[]) AS members(email,display_name,member_id)`,
+      [
+        meetingId,
+        members.map((member) => member.email),
+        members.map((member) => member.display_name),
+        members.map((member) => member.id),
+      ],
+    );
   }
   private async find(
     column: 'id' | 'create_request_id',
