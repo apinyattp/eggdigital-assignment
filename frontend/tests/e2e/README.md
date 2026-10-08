@@ -166,7 +166,7 @@ On normal completion, failure, or handled interruption, the runner terminates it
 
 Manual `workflow_dispatch` offers `profile: full` (default) or `critical`. The `chromium` and `webkit` matrix jobs run one at a time on `ubuntu-latest`, each with a 35-minute timeout. Both profiles use the same jobs and stable names: **Real-stack E2E (chromium)** and **Real-stack E2E (webkit)**. The run title and safe manifests identify the profile. Each job installs dependencies, validates the selection, and runs the same owned real-stack entry point. No case is retried or discarded to make a profile green.
 
-Frontend CI retains unit tests, types, lint, production/image builds, and navigation/member-picker regressions. Backend CI retains all 249 unit and 108 PostgreSQL integration checks plus types/build/image; it also runs the existing `format:check` script. Test counts describe the current inventory and may increase with future changes.
+Frontend CI retains unit tests, types, lint, production/image builds, and navigation/member-picker regressions. Backend CI retains all unit and PostgreSQL integration checks, including provider-storage migration coverage, plus types/build/image; it also runs the existing `format:check` script. Current counts are reported from each run rather than assumed from an older base.
 
 The owner should require these exact check names for PRs targeting `main`:
 
