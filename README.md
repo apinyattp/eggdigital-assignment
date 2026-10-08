@@ -145,6 +145,6 @@ The current migration set contains 11 files. Compare their names with the histor
 
 ดู [ภาพรวม flow และวิธีติดตั้ง/เปิดต้นแบบ](doc/README.md): Login → Member/Guest → รายการนัด → Add/Edit/ทีม/Cancel/Delete → Summary พร้อม Notes ส่วนตัวและ Feedback
 
-ต้นแบบอยู่ใน `doc/` ใช้ข้อมูลสมมติและ local static server ไม่ต้องรัน backend ดู [Wireframe]((https://apinyattp.github.io/eggdigital-assignment/doc)) หรือ [UI design]((https://apinyattp.github.io/eggdigital-assignment/doc/ui-design.html)) โดยดาวน์โหลด/clone แล้วเปิดตามขั้นตอนในคู่มือ
+ต้นแบบอยู่ใน `doc/` ใช้ข้อมูลสมมติและ local static server ไม่ต้องรัน backend ดู [Wireframe](https://apinyattp.github.io/eggdigital-assignment/doc) หรือ [UI design](https://apinyattp.github.io/eggdigital-assignment/doc/ui-design.html) โดยดาวน์โหลด/clone แล้วเปิดตามขั้นตอนในคู่มือ
 
 ส่วนนี้เป็นต้นแบบที่เก็บไว้เพื่ออ้างอิงการออกแบบ เส้นทาง Member/Guest ในต้นแบบไม่ใช่สิทธิ์ของแอปปัจจุบัน ซึ่งอนุญาตให้เข้าสู่ระบบเฉพาะ Member ตาม Application flow overview ด้านบน
