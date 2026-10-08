@@ -30,8 +30,6 @@ const meeting = {
   status: "PENDING",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [
     {
       memberId: request.attendeeMemberIds[0],
@@ -44,43 +42,31 @@ const meeting = {
 };
 afterEach(() => vi.unstubAllGlobals());
 
-describe("SA Online M2/M3 DTO — mocked transport", () => {
-  it.each(["GOOGLE_MEET", "ZOOM"] as const)(
-    "preserves historical %s meetings when reading",
-    async (meetingProvider) => {
+describe("Meeting format and join links — mocked transport", () => {
+  it.each([undefined, null, "https://zoom.us/j/123", "https://meet.google.com/abc-defg-hij"])(
+    "reads Online records without retired fields and preserves eligible joinUrl %s",
+    async (joinUrl) => {
       const saved = {
         ...meeting,
         format: "ONLINE",
-        meetingProvider,
-        externalMeetingId: "room-123",
-        preparationNotes: "Local preparation",
+        ...(joinUrl !== undefined ? { joinUrl } : {}),
       };
       const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ meeting: saved })));
       vi.stubGlobal("fetch", fetcher);
       expect(await meetingsApi.read(meeting.id)).toEqual(saved);
       expect(fetcher.mock.calls[0][1]).toMatchObject({ method: "GET" });
-      expect(saved).not.toHaveProperty("joinUrl");
     },
   );
   it.each([
-    { meetingProvider: null, externalMeetingId: "room" },
-    { meetingProvider: "ZOOM", externalMeetingId: null },
-    { meetingProvider: "OTHER", externalMeetingId: "room" },
-    { meetingProvider: "GOOGLE_MEET", externalMeetingId: "" },
-  ])("rejects inconsistent Online success %s", async (fields) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            meeting: { ...meeting, format: "ONLINE", ...fields },
-          }),
-        ),
-      ),
-    );
-    await expect(meetingsApi.read(meeting.id)).rejects.toMatchObject({
-      code: "INVALID_RESPONSE",
-    });
+    { format: "ONLINE", status: "CANCELLED", joinUrl: "https://meeting.example.test/room" },
+    { format: "ONSITE", status: "PENDING", joinUrl: "https://meeting.example.test/room" },
+    { format: "ONLINE", status: "PENDING", joinUrl: "http://meeting.example.test/room" },
+    { format: "ONLINE", status: "PENDING", joinUrl: "https://user:password@meeting.example.test/room" },
+  ])("suppresses ineligible join links for %s", async (fields) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ meeting: { ...meeting, ...fields } })),
+    ));
+    expect((await meetingsApi.read(meeting.id)).joinUrl).toBeNull();
   });
 });
 
@@ -258,7 +244,6 @@ describe("M2/M3 transport — TEST-MM-019/021/027/030/038, mocked HTTP only", ()
   it.each([
     { ...meeting, attendees: [{ memberId: "x" }] },
     { ...meeting, format: "UNKNOWN" },
-    { ...meeting, meetingProvider: "ZOOM" },
     { ...meeting, description: 7 },
   ])(
     "rejects an invalid representation without substituting the draft",
@@ -440,7 +425,7 @@ describe("E4 delete and abortable creator read — BE1fbe contract", () => {
   });
 });
 
-it("reads manual Online meetings with null provider and external ID", async () => {
+it("reads manual Online meetings without retired fields", async () => {
   const manual = {
     ...meeting,
     format: "ONLINE",
@@ -454,8 +439,6 @@ it("reads manual Online meetings with null provider and external ID", async () =
   );
   await expect(meetingsApi.read(meeting.id)).resolves.toMatchObject({
     format: "ONLINE",
-    meetingProvider: null,
-    externalMeetingId: null,
     joinUrl: manual.joinUrl,
   });
 });
@@ -471,6 +454,5 @@ it("creates and replays a manual Online request with its exact HTTPS link and no
   expect(await meetingsApi.create(body)).toEqual({ meeting: saved, created: false });
   for (const [, options] of fetcher.mock.calls) {
     expect(JSON.parse(options.body)).toEqual(body);
-    expect(JSON.parse(options.body)).not.toHaveProperty("meetingProvider");
   }
 });

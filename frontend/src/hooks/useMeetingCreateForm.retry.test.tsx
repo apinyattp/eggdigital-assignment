@@ -59,8 +59,6 @@ const stored: Meeting = {
   status: "PENDING",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   createdAt: "2030-01-01T02:30:00Z",
   updatedAt: "2030-01-01T02:30:00Z",
 };
@@ -213,7 +211,6 @@ describe("TQA-D01/D02 Add page recovery — mocked HTTP, real form/picker hooks"
       preparationNotes: "  Bring portfolio  ",
       description: "  General details  ",
     });
-    expect(payload).not.toHaveProperty("meetingProvider");
     await act(async () => {
       fireEvent.click(
         screen.getByRole("button", { name: "Check save result again" }),

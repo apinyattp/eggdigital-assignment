@@ -21,13 +21,6 @@ const pool = new Pool({ connectionString: databaseUrl, max: 6, connectionTimeout
 let poolClosed = false;
 const tokens = new TokenService(config);
 const provider = {
-  checkAvailable() {},
-  authorizationUrl() {
-    return '';
-  },
-  async exchange() {
-    throw new Error('Provider must not be called');
-  },
   async verifyIdToken() {
     throw new Error('Provider must not be called');
   },
@@ -37,7 +30,6 @@ function appFor(p: Pool) {
   return createApp(
     config,
     new AuthService(model, tokens, provider, 'unused'),
-    provider,
     model,
     new MemberService(new MemberModel(p)),
     new MeetingService(new MeetingModel(p), () => new Date('2026-10-08T03:00:00Z')),
@@ -85,7 +77,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE meeting_provider_cleanup,meeting_calendar_links,meeting_provider_operations,provider_connections,interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
+    'TRUNCATE interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
   );
   await seedLoginFixtures(pool, password);
 });
@@ -119,8 +111,8 @@ describe('S1 real PostgreSQL M1/M2/M3 and current identity', () => {
       expect(m.format).toBe('ONSITE');
       expect(m.location).toBeNull();
       expect(m.description).toBeNull();
-      expect(m.meetingProvider).toBeNull();
-      expect(m.externalMeetingId).toBeNull();
+      expect(m).not.toHaveProperty('meetingProvider');
+      expect(m).not.toHaveProperty('externalMeetingId');
       expect(m.startsAt).toBe('2026-10-09T02:00:00.000Z');
       expect(m.attendees).toEqual([
         { memberId: attendee, displayName: 'Sample 02', email: 'sample02@example.test' },

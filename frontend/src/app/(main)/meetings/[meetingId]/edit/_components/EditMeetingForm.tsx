@@ -440,15 +440,7 @@ export function EditMeetingForm({
                 <label htmlFor="format">Meeting type</label>
                 <input
                   id="format"
-                  value={
-                    meeting.format === "ONSITE"
-                      ? "Onsite"
-                      : meeting.meetingProvider === "ZOOM"
-                        ? "Online · Zoom"
-                        : meeting.meetingProvider === "GOOGLE_MEET"
-                          ? "Online · Google Meet"
-                          : "Online"
-                  }
+                  value={meeting.format === "ONSITE" ? "Onsite" : "Online"}
                   readOnly
                   disabled
                 />

@@ -1,13 +1,11 @@
-import { beforeAll, describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { OAuth2Client } from 'google-auth-library';
 import { config, memberId, harness, password } from './support.js';
 import { loadConfig } from '../src/config/env.js';
 import { TokenService, canonicalEmail } from '../src/services/token.service.js';
-import { OAuthTransactions } from '../src/services/oauth-transaction.service.js';
 import { GoogleIdentityService } from '../src/integrations/google/google-identity.js';
-import { ApiError } from '../src/utils/api-error.js';
 import { passwordBody } from '../src/middlewares/validate.middleware.js';
 
 describe('TEST-MM-007/008 normalization and password', () => {
@@ -40,37 +38,27 @@ describe('TEST-MM-007/008 normalization and password', () => {
   });
 });
 describe('Google login requires an existing Member before JWT issuance', () => {
-  const methods = ['saveGoogleLogin', 'saveGoogleIdTokenLogin'] as const;
-  it.each(methods)('%s rejects a verified non-Member without issuing a token', async (method) => {
+  it('rejects a verified non-Member without issuing a token', async () => {
     const h = await harness();
     h.members.clear();
     const issue = vi.spyOn(h.tokens, 'issue');
-    const login =
-      method === 'saveGoogleLogin'
-        ? h.auth.saveGoogleLogin('controlled-code', 'controlled-nonce')
-        : h.auth.saveGoogleIdTokenLogin('controlled-id-token');
+    const login = h.auth.saveGoogleIdTokenLogin('controlled-id-token');
     await expect(login).rejects.toMatchObject({ status: 404, code: 'MEMBER_NOT_FOUND' });
     expect(issue).not.toHaveBeenCalled();
     expect(h.members.size).toBe(0);
   });
-  it.each(methods)('%s preserves Candidate denial before missing membership', async (method) => {
+  it('preserves Candidate denial before missing membership', async () => {
     const h = await harness();
     h.members.clear();
     h.candidates.add('sample01@example.test');
     const issue = vi.spyOn(h.tokens, 'issue');
-    const login =
-      method === 'saveGoogleLogin'
-        ? h.auth.saveGoogleLogin('controlled-code', 'controlled-nonce')
-        : h.auth.saveGoogleIdTokenLogin('controlled-id-token');
+    const login = h.auth.saveGoogleIdTokenLogin('controlled-id-token');
     await expect(login).rejects.toMatchObject({ status: 403, code: 'CANDIDATE_DENIED' });
     expect(issue).not.toHaveBeenCalled();
   });
-  it.each(methods)('%s retains the registered Member identity and Google token', async (method) => {
+  it('retains the registered Member identity and Google token', async () => {
     const h = await harness();
-    const result =
-      method === 'saveGoogleLogin'
-        ? await h.auth.saveGoogleLogin('controlled-code', 'controlled-nonce')
-        : await h.auth.saveGoogleIdTokenLogin('controlled-id-token');
+    const result = await h.auth.saveGoogleIdTokenLogin('controlled-id-token');
     expect(result.user).toMatchObject({
       id: memberId,
       membership: 'member',
@@ -201,43 +189,6 @@ describe('TEST-MM-053/055 JWT verification', () => {
     ).rejects.toMatchObject({ status: 401 });
   });
 });
-describe('TEST-MM-024/026/054 transaction state', () => {
-  it('binds browser/state, consumes once, retains cancellation and rejects replay', () => {
-    const tx = new OAuthTransactions();
-    const a = tx.start();
-    const b = tx.start();
-    expect(() => tx.consume(b.binding, a.entry.state)).toThrow();
-    expect(() => tx.consume(a.binding, 'bad')).toThrow();
-    const entry = tx.consume(a.binding, a.entry.state);
-    expect(() => tx.consume(a.binding, a.entry.state)).toThrow();
-    expect(entry.status).toBe('exchanging');
-    tx.cancel(a.binding);
-    expect(() => tx.complete(entry)).toThrowError(
-      expect.objectContaining({ code: 'AUTH_ATTEMPT_CANCELLED' }),
-    );
-    expect(b.entry.status).toBe('pending');
-    expect(JSON.stringify(entry).includes(a.binding)).toBe(false);
-  });
-  it('expires pending/in-flight at 300 seconds and restart loses only pending transactions', () => {
-    let now = 1000;
-    const tx = new OAuthTransactions(() => now);
-    const a = tx.start();
-    const entry = tx.consume(a.binding, a.entry.state);
-    now += 300_000;
-    expect(() => tx.complete(entry)).toThrowError(
-      expect.objectContaining({ code: 'OAUTH_TRANSACTION_INVALID' }),
-    );
-    expect(() => new OAuthTransactions().consume(a.binding, a.entry.state)).toThrow();
-  });
-  it('new start cancels prior exchange; capacity is bounded', () => {
-    const tx = new OAuthTransactions(Date.now, 2);
-    const a = tx.start();
-    tx.consume(a.binding, a.entry.state);
-    tx.start(a.binding);
-    expect(a.entry.status).toBe('cancelled');
-    expect(() => tx.start()).toThrowError(expect.objectContaining({ status: 503 }));
-  });
-});
 describe('TEST-MM-054 configuration', () => {
   const env = {
     DATABASE_URL: config.databaseUrl,
@@ -249,41 +200,33 @@ describe('TEST-MM-054 configuration', () => {
         'JWT_SIGNING_KEY_BASE64',
       );
   });
-  it('password config works without Google; wrong redirect disables Google only', () => {
-    expect(loadConfig(env).google).toBeUndefined();
+  it('password config works without Google; retired settings do not disable ID-token verification', () => {
+    expect(loadConfig(env).googleClientId).toBeUndefined();
     expect(
       loadConfig({
         ...env,
-        GOOGLE_CLIENT_ID: 'public-id',
+        GOOGLE_CLIENT_ID: ' public-id ',
         GOOGLE_CLIENT_SECRET: 'synthetic',
         GOOGLE_REDIRECT_URI: 'http://localhost:3000/wrong',
-      }).google,
-    ).toBeUndefined();
+      }).googleClientId,
+    ).toBe('public-id');
   });
 });
 describe('TEST-MM-024 controlled Google verifier outcomes (not live provider)', () => {
   afterEach(() => vi.restoreAllMocks());
-  const settings = {
-    clientId: 'synthetic.apps.googleusercontent.com',
-    clientSecret: 'synthetic-test-only',
-    redirectUri: 'http://localhost:3000/auth/google/callback',
-  };
+  const audience = 'synthetic.apps.googleusercontent.com';
   function mocks(payload: Record<string, unknown>) {
-    vi.spyOn(OAuth2Client.prototype, 'getToken').mockResolvedValue({
-      tokens: { id_token: 'synthetic-token', access_token: 'discarded' },
-      res: null,
-    } as never);
     vi.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockResolvedValue({
       getPayload: () => ({
         iss: 'https://accounts.google.com',
-        aud: settings.clientId,
+        aud: audience,
         exp: Math.floor(Date.now() / 1000) + 3600,
         iat: Math.floor(Date.now() / 1000),
         ...payload,
       }),
     } as never);
   }
-  it('creates OIDC-only URL and checks nonce/verified Gmail identity', async () => {
+  it('checks nonce and verified Gmail identity', async () => {
     mocks({
       sub: '1234',
       email: 'Member@gmail.com',
@@ -291,16 +234,13 @@ describe('TEST-MM-024 controlled Google verifier outcomes (not live provider)', 
       nonce: 'expected',
       name: 'Member',
     });
-    const service = new GoogleIdentityService(settings);
-    const url = new URL(service.authorizationUrl('state', 'expected'));
-    expect(url.searchParams.get('scope')).toBe('openid email profile');
-    expect(url.searchParams.has('access_type')).toBe(false);
-    expect(await service.exchange('code', 'expected')).toEqual({
+    const service = new GoogleIdentityService(audience);
+    expect(await service.verifyIdToken('controlled-id-token', 'expected')).toEqual({
       sub: '1234',
       email: 'member@gmail.com',
       displayName: 'Member',
     });
-    await expect(service.exchange('code', 'wrong')).rejects.toMatchObject({
+    await expect(service.verifyIdToken('controlled-id-token', 'wrong')).rejects.toMatchObject({
       code: 'GOOGLE_IDENTITY_INVALID',
     });
   });
@@ -323,7 +263,7 @@ describe('TEST-MM-024 controlled Google verifier outcomes (not live provider)', 
         ...change,
       });
       await expect(
-        new GoogleIdentityService(settings).exchange('code', 'expected'),
+        new GoogleIdentityService(audience).verifyIdToken('controlled-id-token', 'expected'),
       ).rejects.toMatchObject({ status: 401 });
     });
   it('accepts verified Workspace without persistent linking', async () => {
@@ -335,31 +275,25 @@ describe('TEST-MM-024 controlled Google verifier outcomes (not live provider)', 
       nonce: 'expected',
     });
     await expect(
-      new GoogleIdentityService(settings).exchange('code', 'expected'),
+      new GoogleIdentityService(audience).verifyIdToken('controlled-id-token', 'expected'),
     ).resolves.toHaveProperty('email', 'a@example.test');
   });
-  it('classifies provider failure without retrying one-use code', async () => {
-    const exchange = vi
-      .spyOn(OAuth2Client.prototype, 'getToken')
+  it('classifies verification dependency failure without retrying', async () => {
+    const verify = vi
+      .spyOn(OAuth2Client.prototype, 'verifyIdToken')
       .mockRejectedValue({ code: 'ETIMEDOUT' });
     await expect(
-      new GoogleIdentityService(settings).exchange('code', 'expected'),
+      new GoogleIdentityService(audience).verifyIdToken('controlled-id-token', 'expected'),
     ).rejects.toMatchObject({ code: 'GOOGLE_AUTH_UNAVAILABLE' });
-    expect(exchange).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledTimes(1);
   });
-  it('rejects token-verifier failure and invalid grant', async () => {
+  it('rejects token-verifier signature failure', async () => {
     mocks({});
     vi.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockRejectedValue(
       new Error('signature verification failed'),
     );
     await expect(
-      new GoogleIdentityService(settings).exchange('code', 'expected'),
+      new GoogleIdentityService(audience).verifyIdToken('controlled-id-token', 'expected'),
     ).rejects.toMatchObject({ code: 'GOOGLE_IDENTITY_INVALID' });
-    vi.spyOn(OAuth2Client.prototype, 'getToken').mockRejectedValue({
-      response: { status: 400, data: { error: 'invalid_grant' } },
-    });
-    await expect(
-      new GoogleIdentityService(settings).exchange('code', 'expected'),
-    ).rejects.toMatchObject({ status: 401 });
   });
 });

@@ -61,8 +61,6 @@ const meeting: Meeting = {
   status: "REJECTED",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [
     { memberId: null, displayName: "Guest", email: "guest@example.test" },
   ],

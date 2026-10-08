@@ -61,8 +61,6 @@ const meeting: Meeting = {
   status: "CANCELLED",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [
     { memberId: null, displayName: "Guest", email: "guest@example.test" },
     { memberId: "team", displayName: "Team", email: "team@example.test" },
@@ -76,7 +74,7 @@ beforeEach(() => {
 });
 describe("creator Edit/team state and exact recovery", () => {
   it("reconciles an uncertain historical Online cancellation with only a meeting read", async () => {
-    const online: Meeting = { ...meeting, format: "ONLINE", meetingProvider: "ZOOM", externalMeetingId: "123", status: "CONFIRMED", joinUrl: "https://zoom.us/j/123" };
+    const online: Meeting = { ...meeting, format: "ONLINE", status: "CONFIRMED", joinUrl: "https://zoom.us/j/123" };
     const api = {
       read: vi.fn().mockResolvedValueOnce(online).mockResolvedValue({ ...online, status: "CANCELLED", joinUrl: null }),
       edit: vi.fn().mockRejectedValue(new MeetingError("NETWORK_ERROR")),
@@ -379,8 +377,6 @@ describe("manual meeting link edit contract", () => {
     ...meeting,
     format: "ONLINE",
     status: "PENDING",
-    meetingProvider: null,
-    externalMeetingId: null,
     joinUrl: "https://meeting.example.test/old",
   };
   it("preserves an omitted unchanged link and schedule", () => {

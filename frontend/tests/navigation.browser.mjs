@@ -146,8 +146,6 @@ await page.route("**/api/v1/**", async (route) => {
         ...summary,
         creatorId: "owner",
         candidate: { ...summary.candidate, email: "candidate@example.test" },
-        meetingProvider: null,
-        externalMeetingId: null,
         createdAt: "2026-10-07T03:00:00Z",
         updatedAt: "2026-10-08T03:00:00Z",
       },

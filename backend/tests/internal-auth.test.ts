@@ -34,7 +34,6 @@ describe('TEST-MM-027 B1 authenticated internal caller', () => {
     const app = createApp(
       { ...config, authServiceKey: undefined },
       h.auth,
-      h.google,
       h.model,
       h.memberService,
       h.meetingService,
@@ -133,7 +132,6 @@ describe('TEST-MM-011/012/023/024 B1 transport and common issuer', () => {
     expect(r.body.user.membership).toBe('member');
     expect((await h.tokens.verify(r.body.accessToken)).identity.authMethod).toBe('google');
     expect(h.google.verifyIdToken).toHaveBeenCalledWith('controlled-token');
-    expect(h.google.exchange).not.toHaveBeenCalled();
     h.members.clear();
     const issueToken = vi.spyOn(h.tokens, 'issue');
     const missing = await issue().send({ method: 'google', idToken: 'controlled-token' });
@@ -188,11 +186,10 @@ describe('TEST-MM-024/054 extracted Google verifier (controlled library outcome)
   it('verifies with audience alone and never performs another authorization-code exchange', async () => {
     const verify = verified();
     const exchange = vi.spyOn(OAuth2Client.prototype, 'getToken');
-    const service = new GoogleIdentityService(undefined, audience);
+    const service = new GoogleIdentityService(audience);
     expect((await service.verifyIdToken('controlled-id-token')).email).toBe('member@gmail.com');
     expect(verify).toHaveBeenCalledWith({ idToken: 'controlled-id-token', audience });
     expect(exchange).not.toHaveBeenCalled();
-    expect(() => service.checkAvailable()).toThrow(); // Legacy code exchange is still unavailable.
   });
   it.each([
     { aud: 'wrong' },
@@ -206,12 +203,12 @@ describe('TEST-MM-024/054 extracted Google verifier (controlled library outcome)
   ])('rejects invalid provider claims %#', async (change) => {
     verified(change);
     await expect(
-      new GoogleIdentityService(undefined, audience).verifyIdToken('controlled'),
+      new GoogleIdentityService(audience).verifyIdToken('controlled'),
     ).rejects.toMatchObject({ code: 'GOOGLE_IDENTITY_INVALID' });
   });
   it('preserves Workspace acceptance and nonauthoritative third-party denial', async () => {
     const verify = verified({ email: 'member@example.test', hd: 'example.test' });
-    const service = new GoogleIdentityService(undefined, audience);
+    const service = new GoogleIdentityService(audience);
     expect((await service.verifyIdToken('controlled')).email).toBe('member@example.test');
     verify.mockRestore();
     verified({ email: 'member@example.test' });
@@ -225,7 +222,7 @@ describe('TEST-MM-024/054 extracted Google verifier (controlled library outcome)
     ).rejects.toMatchObject({ code: 'GOOGLE_AUTH_UNAVAILABLE' });
     verified({ nonce: 'original' });
     await expect(
-      new GoogleIdentityService(undefined, audience).verifyIdToken('controlled', 'different'),
+      new GoogleIdentityService(audience).verifyIdToken('controlled', 'different'),
     ).rejects.toMatchObject({ code: 'GOOGLE_IDENTITY_INVALID' });
   });
   it('loads independent audience without Google secret/legacy redirect and validates caller config safely', () => {
