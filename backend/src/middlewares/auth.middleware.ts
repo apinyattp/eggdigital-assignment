@@ -60,12 +60,3 @@ export function accessCookie(config: Config) {
     maxAge: config.ttlSeconds * 1000,
   };
 }
-export function transactionCookie(config: Config) {
-  return {
-    httpOnly: true,
-    path: '/api/v1/auth',
-    sameSite: 'lax' as const,
-    secure: config.secureCookies,
-    maxAge: 300_000,
-  };
-}

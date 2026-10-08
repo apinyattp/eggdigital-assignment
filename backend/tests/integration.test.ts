@@ -22,19 +22,12 @@ const pool = new Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 
 const model = new AuthModel(pool);
 const tokens = new TokenService(config);
 const provider = {
-  checkAvailable() {},
-  authorizationUrl(state: string, nonce: string) {
-    return `https://accounts.google.com/o/oauth2/v2/auth?state=${state}&nonce=${nonce}`;
-  },
-  async exchange() {
+  async verifyIdToken() {
     return {
       sub: 'fixture-google-sub',
       email: 'sample01@example.test',
       displayName: 'Controlled provider',
     };
-  },
-  async verifyIdToken() {
-    return this.exchange();
   },
 };
 let auth: AuthService;
@@ -90,7 +83,6 @@ beforeAll(async () => {
   app = createApp(
     config,
     auth,
-    provider,
     model,
     new MemberService(new MemberModel(pool)),
     new MeetingService(new MeetingModel(pool)),
@@ -380,7 +372,6 @@ describe('TEST-MM-008/009/025 real SQL password and current-principal checks', (
     const deadApp = createApp(
       config,
       deadAuth,
-      provider,
       deadModel,
       new MemberService(new MemberModel(pool)),
       new MeetingService(new MeetingModel(pool)),

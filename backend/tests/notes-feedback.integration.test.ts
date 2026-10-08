@@ -20,13 +20,6 @@ const databaseUrl = requireLocalDatabase(process.env.TEST_DATABASE_URL, true);
 const pool = new Pool({ connectionString: databaseUrl, max: 6 });
 const tokens = new TokenService(config);
 const provider = {
-  checkAvailable() {},
-  authorizationUrl() {
-    return '';
-  },
-  async exchange() {
-    throw new Error('No provider calls');
-  },
   async verifyIdToken() {
     throw new Error('No provider calls');
   },
@@ -38,7 +31,6 @@ const service = new MeetingService(model, () => new Date(currentTime));
 const app = createApp(
   config,
   new AuthService(authModel, tokens, provider, 'unused'),
-  provider,
   authModel,
   new MemberService(new MemberModel(pool)),
   service,

@@ -16,7 +16,7 @@ async function main() {
   const config = loadConfig(process.env);
   const pool = createPool(config);
   const model = new AuthModel(pool);
-  const google = new GoogleIdentityService(config.google, config.googleClientId);
+  const google = new GoogleIdentityService(config.googleClientId);
   const tokens = new TokenService(config);
   const dummyHash = await argon2.hash(randomBytes(32), {
     type: argon2.argon2id,
@@ -28,7 +28,7 @@ async function main() {
   const members = new MemberService(new MemberModel(pool));
   const meetingModel = new MeetingModel(pool);
   const meetings = new MeetingService(meetingModel);
-  const server = createApp(config, auth, google, model, members, meetings).listen(
+  const server = createApp(config, auth, model, members, meetings).listen(
     config.port,
     '0.0.0.0',
     () => process.stdout.write('Backend listening\n'),

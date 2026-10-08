@@ -21,13 +21,6 @@ const pool = new Pool({ connectionString: databaseUrl, max: 6, connectionTimeout
 let poolClosed = false;
 const tokens = new TokenService(config);
 const provider = {
-  checkAvailable() {},
-  authorizationUrl() {
-    return '';
-  },
-  async exchange() {
-    throw new Error('Provider must not be called');
-  },
   async verifyIdToken() {
     throw new Error('Provider must not be called');
   },
@@ -37,7 +30,6 @@ function appFor(p: Pool) {
   return createApp(
     config,
     new AuthService(model, tokens, provider, 'unused'),
-    provider,
     model,
     new MemberService(new MemberModel(p)),
     new MeetingService(new MeetingModel(p), () => new Date('2026-10-08T03:00:00Z')),

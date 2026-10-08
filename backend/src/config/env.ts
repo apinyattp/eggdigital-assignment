@@ -10,7 +10,6 @@ export type Config = {
   secureCookies: boolean;
   authServiceKey?: string;
   googleClientId?: string;
-  google?: { clientId: string; clientSecret: string; redirectUri: string };
 };
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const schema = z.object({
@@ -48,26 +47,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     throw new Error('Invalid configuration keys: COOKIE_SECURE');
   if (e.COOKIE_SECURE === 'false' && origin.hostname !== 'localhost')
     throw new Error('Invalid configuration keys: COOKIE_SECURE');
-  let google: Config['google'];
-  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI) {
-    try {
-      const redirect = new URL(env.GOOGLE_REDIRECT_URI);
-      if (
-        redirect.origin === e.ALLOWED_ORIGIN &&
-        redirect.pathname === '/auth/google/callback' &&
-        !redirect.search &&
-        !redirect.hash
-      ) {
-        google = {
-          clientId: env.GOOGLE_CLIENT_ID,
-          clientSecret: env.GOOGLE_CLIENT_SECRET,
-          redirectUri: env.GOOGLE_REDIRECT_URI,
-        };
-      }
-    } catch {
-      /* Google unavailable; password path stays available. */
-    }
-  }
   return {
     port: e.PORT,
     databaseUrl: e.DATABASE_URL,
@@ -79,6 +58,5 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     secureCookies: e.COOKIE_SECURE === 'true',
     authServiceKey: e.AUTH_SERVICE_KEY,
     googleClientId: env.GOOGLE_CLIENT_ID?.trim() || undefined,
-    google,
   };
 }
