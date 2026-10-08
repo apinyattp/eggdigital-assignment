@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceLoading } from "@/app/(main)/_components/WorkspaceLoading";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SaveToast } from "@/components/ui/SaveToast";
@@ -53,7 +54,7 @@ export function EditMeetingForm({
   if (!auth.checked || auth.status === "checking")
     return (
       <main className={styles.shell}>
-        <p role="status">Checking your account…</p>
+        <WorkspaceLoading message="Checking your account…" />
       </main>
     );
   if (auth.usableSession?.user.membership !== "member")
@@ -84,7 +85,7 @@ export function EditMeetingForm({
   if (edit.phase === "loading")
     return (
       <main className={styles.shell}>
-        <p role="status">Loading meeting details…</p>
+        <WorkspaceLoading message="Loading meeting details…" />
         {back}
       </main>
     );

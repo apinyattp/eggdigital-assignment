@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceLoading } from "@/app/(main)/_components/WorkspaceLoading";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@/api/auth/authApi";
@@ -74,11 +75,7 @@ export function MeetingDashboard({
         onWeekChange={setWeek}
       />
       {list.phase === "loading" && (
-        <div className={styles.panel} role="status">
-          Loading interviews…
-          <div className={styles.skeleton} aria-hidden="true" />
-          <div className={styles.skeleton} aria-hidden="true" />
-        </div>
+        <WorkspaceLoading message="Loading interviews…" />
       )}
       {list.phase === "error" && (
         <div className={styles.panel} role="alert">
