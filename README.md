@@ -134,31 +134,6 @@ curl --fail http://localhost:3001/api/v1/health/ready
 
 The current migration set contains 11 files. Compare their names with the history; a healthy HTTP response alone does not prove that every expected migration is present. Local fixture creation is the separate `npm run seed:login` command from Local setup. Do not delete the volume or migration history to rerun a migration.
 
-### Railway production image
-
-This path is **prepared but not deployed or verified against a production database**. First confirm the intended Railway project/environment/backend service and PostgreSQL target. Set `DATABASE_URL` privately in that backend service's Railway Variables; the migration command requires this variable and no fixture password. Application startup separately requires the backend settings listed in Railway deployment preparation.
-
-The backend Dockerfile copies the existing `migrations/` and `scripts/migrate-production.mjs` into the runtime image; `node-pg-migrate` and `pg` are production dependencies. Set the service's **Pre-deploy Command** to:
-
-```sh
-node scripts/migrate-production.mjs
-```
-
-Railway runs this command inside the deployment image with the service variables and private-network access. It applies pending migrations only; failure must block deployment. Do not use the local-only `npm run migrate` command against Railway and do not configure a production seed command. Running the production command manually is appropriate only inside the confirmed backend service environment after checking its target; never substitute an unknown local or remote database URL.
-
-To inspect history, run this read-only SQL in the confirmed database's query console:
-
-```sql
-SELECT name, run_on FROM pgmigrations ORDER BY id;
-```
-
-After deployment, verify `/api/v1/health/ready` through the configured frontend public origin or the backend service's private network. A read-only check from inside the backend container uses its injected `PORT`:
-
-```sh
-node -e 'fetch("http://127.0.0.1:" + process.env.PORT + "/api/v1/health/ready").then(r => { console.log("readiness", r.status); process.exitCode = r.ok ? 0 : 1; }).catch(() => { console.error("Readiness check failed"); process.exitCode = 1; })'
-```
-
-No database provisioning, migration execution, seeding or destructive reset is performed by these documentation changes.
 
 ## Current database schema
 
