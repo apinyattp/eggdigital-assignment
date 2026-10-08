@@ -44,13 +44,22 @@ async function logoutButton(page, touch = false) {
 }
 async function assertSignedOut({ page, context, origin }) {
   await page.waitForURL(`${origin}/login`);
-  assert.deepEqual(
-    (await context.cookies())
+  await check(async () => {
+    const remaining = (await context.cookies())
       .filter(({ name }) => isSessionCookie(name))
-      .map(({ name }) => name),
-    [],
-    "Both application and library session cookies are cleared",
-  );
+      .map(({ name, domain, path, expires, value }) => ({
+        name,
+        domain,
+        path,
+        expires,
+        nonempty: value.length > 0,
+      }));
+    assert.deepEqual(
+      remaining,
+      [],
+      "Both application and library session cookies are cleared",
+    );
+  }, 5000);
   assert.equal(
     (await context.request.get(`${origin}/api/v1/auth/session`)).status(),
     401,

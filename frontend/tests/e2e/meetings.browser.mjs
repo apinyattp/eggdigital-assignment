@@ -128,13 +128,37 @@ await runSuite("meetings", async ({ run }) => {
         20,
       ),
     );
+    let secondPageRequests = 0;
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === "/api/v1/members" &&
+        url.searchParams.get("page") === "2"
+      )
+        secondPageRequests++;
+    });
     await page.getByRole("button", { name: "Load more members" }).click();
-    await check(async () =>
-      assert.equal(
-        await page.getByRole("listbox").getByRole("option").count(),
-        40,
-      ),
-    );
+    try {
+      await check(async () =>
+        assert.equal(
+          await page.getByRole("listbox").getByRole("option").count(),
+          40,
+        ),
+      );
+    } catch (error) {
+      const focus = await page.evaluate(() => ({
+        tag: document.activeElement?.tagName,
+        id: document.activeElement?.id,
+      }));
+      error.message +=
+        "\nMember pagination state: " +
+        JSON.stringify({
+          secondPageRequests,
+          expanded: await search.getAttribute("aria-expanded"),
+          focus,
+        });
+      throw error;
+    }
     await page.getByRole("button", { name: "Load more members" }).click();
     await check(async () =>
       assert.equal(

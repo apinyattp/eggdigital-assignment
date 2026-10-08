@@ -91,6 +91,7 @@ export async function runSuite(suite, execute) {
     const fixture = await resetFixture();
     const actors = [];
     const errors = [];
+    const failedRequests = [];
     async function newActor(actorOptions = {}) {
       const context = await browser.newContext({
         viewport: { width: 1440, height: 1000 },
@@ -98,18 +99,27 @@ export async function runSuite(suite, execute) {
       });
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
-      page.on("pageerror", (error) => errors.push(error.message));
-      await context.route("**/*", async (route) => {
-        const url = new URL(route.request().url());
-        if (
-          ["http:", "https:"].includes(url.protocol) &&
-          !["127.0.0.1", "localhost"].includes(url.hostname)
-        ) {
-          errors.push(`Unexpected external request: ${url.origin}`);
-          return route.abort();
-        }
-        return route.continue();
+      page.on("pageerror", (error) =>
+        errors.push({ name: error.name, message: error.message }),
+      );
+      page.on("requestfailed", (request) => {
+        if (failedRequests.length < 10)
+          failedRequests.push({
+            path: new URL(request.url()).pathname,
+            navigation: request.isNavigationRequest(),
+            failure: request.failure()?.errorText ?? "unknown",
+          });
       });
+      await context.route(
+        (url) =>
+          ["http:", "https:"].includes(url.protocol) &&
+          !["127.0.0.1", "localhost"].includes(url.hostname),
+        async (route) => {
+          const url = new URL(route.request().url());
+          errors.push(`Unexpected external request: ${url.origin}`);
+          await route.abort();
+        },
+      );
       if (collectTraces)
         await context.tracing.start({
           screenshots: true,
@@ -153,6 +163,8 @@ export async function runSuite(suite, execute) {
             .catch(() => {});
         }
       let message = error.message;
+      if (failedRequests.length)
+        message += "\nFailed requests: " + JSON.stringify(failedRequests);
       for (const secret of [
         fixture.password,
         process.env.NEXTAUTH_SECRET,
