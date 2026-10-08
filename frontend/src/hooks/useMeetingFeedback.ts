@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   interviewContentApi,
   InterviewContentError,
@@ -503,24 +503,28 @@ export function useMeetingFeedback(
     state.principal === principal &&
     state.meetingId === meetingId;
   const view = visible ? state : createInitialFeedbackState(meetingId, null);
-  return {
-    ...view,
-    visible,
-    canAdd:
-      visible &&
-      view.phase === "ready" &&
-      !view.loading &&
-      !view.refreshRequired &&
-      !view.editor &&
-      view.ownFeedbackId === null,
-    refresh: () => actions.current?.refresh(),
-    older: () => actions.current?.older(),
-    retryLoad: () => actions.current?.retryLoad(),
-    open: (id?: string) => actions.current?.open(id),
-    close: () => actions.current?.close(),
-    change: (text: string) => actions.current?.change(text),
-    save: () => actions.current?.save(),
-    retrySave: () => actions.current?.retrySave(),
-    resolve: (keepDraft: boolean) => actions.current?.resolve(keepDraft),
-  };
+  // Keep the presentation stable when its parent updates only the status clock.
+  return useMemo(
+    () => ({
+      ...view,
+      visible,
+      canAdd:
+        visible &&
+        view.phase === "ready" &&
+        !view.loading &&
+        !view.refreshRequired &&
+        !view.editor &&
+        view.ownFeedbackId === null,
+      refresh: () => actions.current?.refresh(),
+      older: () => actions.current?.older(),
+      retryLoad: () => actions.current?.retryLoad(),
+      open: (id?: string) => actions.current?.open(id),
+      close: () => actions.current?.close(),
+      change: (text: string) => actions.current?.change(text),
+      save: () => actions.current?.save(),
+      retrySave: () => actions.current?.retrySave(),
+      resolve: (keepDraft: boolean) => actions.current?.resolve(keepDraft),
+    }),
+    [view, visible],
+  );
 }

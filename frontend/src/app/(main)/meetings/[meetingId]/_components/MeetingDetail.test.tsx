@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSnapshot } from "@/hooks/authController";
 import { MeetingError, type Meeting } from "@/api/meetings";
 const mock = vi.hoisted(() => ({
@@ -386,4 +386,63 @@ describe("Detail creator status commands", () => {
       expect(mock.edit).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("Detail status clock boundaries", () => {
+  const start = Date.parse("2026-10-08T03:00:00Z");
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+  });
+  afterEach(() => vi.useRealTimers());
+  async function mount(summaryEnd: number, editEnd = summaryEnd) {
+    mock.summaryEndsAt = new Date(summaryEnd).toISOString();
+    mock.summaryStatus = "PENDING";
+    mock.read.mockResolvedValue({
+      ...meeting,
+      status: "PENDING",
+      endsAt: new Date(editEnd).toISOString(),
+    });
+    const view = render(<MeetingDetail meetingId="meeting" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    return view;
+  }
+  it.each(["summary", "edit"])(
+    "expires at equality on the existing one-second tick for the %s end",
+    async (source) => {
+      const view = await mount(
+        start + (source === "summary" ? 1000 : 5000),
+        start + (source === "edit" ? 1000 : 5000),
+      );
+      expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+      act(() => vi.advanceTimersByTime(999));
+      expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+      expect(mock.edit).not.toHaveBeenCalled();
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it("rejects a click at an end between ticks, then hides controls on the next tick", async () => {
+    await mount(start + 1500);
+    act(() => vi.advanceTimersByTime(1499));
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+    act(() => vi.advanceTimersByTime(1));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(mock.edit).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(499));
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+  });
+  it("does not initialize status editing when mounted exactly at the summary end", async () => {
+    await mount(start);
+    expect(mock.read).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+  });
 });
