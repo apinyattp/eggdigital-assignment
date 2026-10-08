@@ -1,9 +1,6 @@
 # eggdigital-assignment
 
-Meeting Manager: Next.js frontend, Express backend and PostgreSQL, run locally as three Docker Compose services. Password login, current identity, JWT expiry and current-browser logout are implemented. NextAuth handles browser password/Google login and Google code exchange; Express issues API JWTs and verifies authoritative Gmail/Workspace identities; it does not connect Calendar or create meeting rooms. Meeting creation, creator edit/team/cancel/delete, Detail, private Interview Notes, Feedback and numeric pagination are implemented. Google login requires an existing Member; Online meetings use a manual HTTPS link. Automatic Calendar/Meet/Zoom integration is removed.
-
 ## Application flow overview
-
 1. **Login:** an existing Member signs in with a password or an eligible Google account. NextAuth handles the browser login; the backend verifies membership and issues the API JWT. Candidate identities are denied, including an email that also appears as a Member. Google login does not register new Members.
 2. **Dashboard:** the Member selects a date and sees meetings they created or attend, grouped as upcoming/current, rejected/cancelled, and past. Upcoming/current meetings use numeric pages of 10. Dates are interpreted in `Asia/Bangkok`.
 3. **Create:** enter meeting and candidate details, start/end times, and at least one other Member. Choose Onsite with location or Online with a manually supplied HTTPS join link. Saving creates the local meeting and attendee records; it does not create a Google/Zoom room, Calendar event or invitation email.
@@ -12,6 +9,25 @@ Meeting Manager: Next.js frontend, Express backend and PostgreSQL, run locally a
 6. **Logout or expiry:** logout clears the current browser's NextAuth/API authentication state. Expiry requires login again; logout does not revoke copied JWTs or other browser sessions.
 
 The browser talks to Next.js for login and to Express for meeting data. Express validates identity, authorization and inputs before using parameterized PostgreSQL queries. In production, browser API traffic must stay on the frontend's public origin through the `/api/v1` proxy described below.
+
+## Flow overview
+
+```mermaid
+flowchart TD
+  L[Login ด้วยบัญชีสมมติ] --> M[Member]
+  L --> G[Guest ที่มีอีเมลอยู่ในทีมของนัด]
+  M --> D[รายการนัดตามสิทธิ์]
+  G --> D
+  D --> S[Summary / รายละเอียดนัด]
+  D --> A[Member: Add Meeting และเลือกทีม]
+  A --> S
+  S --> E[ผู้จัด: Edit / Cancel / Delete]
+  E --> D
+  S --> N[Notes ส่วนตัวของผู้เขียน]
+  S --> F[Feedback ของนัดปัจจุบัน]
+  D --> O[Logout กลับ Login]
+```
+
 
 ## Local setup
 
