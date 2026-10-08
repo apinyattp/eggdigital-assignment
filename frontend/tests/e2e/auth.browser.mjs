@@ -54,14 +54,25 @@ async function assertSignedOut({ page, context, origin }) {
         expires,
         nonempty: value.length > 0,
       }));
+    // WebKit's raw cookie API can retain empty, expired deletion tombstones.
+    // A nonempty value, session lifetime, or future expiry still fails logout.
+    const now = Date.now() / 1000;
     assert.deepEqual(
-      remaining,
+      remaining.filter(
+        ({ nonempty, expires }) => nonempty || !(expires > 0 && expires <= now),
+      ),
       [],
-      "Both application and library session cookies are cleared",
+      "Session cookies are absent or empty, expired deletion tombstones",
     );
   }, 5000);
   assert.equal(
-    (await context.request.get(`${origin}/api/v1/auth/session`)).status(),
+    await page.evaluate(async () => {
+      const response = await fetch("/api/v1/auth/session", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      return response.status;
+    }),
     401,
   );
   await page.reload();

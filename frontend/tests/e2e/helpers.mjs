@@ -23,14 +23,37 @@ export async function login(page, account, password) {
   await page
     .getByLabel("Password", { exact: true })
     .fill(password ?? account.password);
-  await page.getByRole("button", { name: "Login", exact: true }).click();
-  await page.waitForURL("**/dashboard");
-  await page
-    .getByRole("navigation", {
-      name: "Workspace navigation",
-      includeHidden: true,
-    })
-    .waitFor({ state: "attached" });
+  // Observe finite API bodies before callers navigate away; the shell can mount
+  // while its initial identity/dashboard reads are still in flight.
+  const [identity] = await Promise.all([
+    page
+      .waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/auth/session" &&
+          response.request().method() === "GET" &&
+          response.status() === 200,
+      )
+      .then((response) => response.json()),
+    page
+      .waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/meetings" &&
+          response.request().method() === "GET" &&
+          response.status() === 200,
+      )
+      .then((response) => response.json()),
+    (async () => {
+      await page.getByRole("button", { name: "Login", exact: true }).click();
+      await page.waitForURL("**/dashboard");
+      await page
+        .getByRole("navigation", {
+          name: "Workspace navigation",
+          includeHidden: true,
+        })
+        .waitFor({ state: "attached" });
+    })(),
+  ]);
+  assert.equal(identity.user?.id, account.id);
 }
 export async function chooseDate(page, label, date) {
   await page.getByRole("textbox", { name: label, exact: true }).click();
