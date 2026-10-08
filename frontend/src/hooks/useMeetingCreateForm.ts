@@ -4,10 +4,10 @@ import { authController } from "./authController";
 import { useCurrentIdentity } from "./useAuth";
 import { useMemberPicker } from "./useMemberPicker";
 import {
-  useOnsiteCreate,
+  useMeetingCreate,
   type OnsiteDraft,
   type OnlineDraft,
-} from "./useOnsiteCreate";
+} from "./useMeetingCreate";
 import type { MeetingStatus } from "@/api/meetings";
 import { meetingJoinUrl } from "@/utils/meetingLinks";
 import { AuthError } from "@/api/auth/authError";
@@ -23,7 +23,7 @@ export function bangkokToday(now = new Date()) {
     .map((key) => parts.find((part) => part.type === key)!.value)
     .join("-");
 }
-export const newOnsiteForm = () => ({
+export const newMeetingCreateForm = () => ({
   candidateName: "",
   candidateEmail: "",
   position: "",
@@ -38,9 +38,9 @@ export const newOnsiteForm = () => ({
   start: "09:00",
   end: "10:00",
 });
-export type OnsiteFormValues = ReturnType<typeof newOnsiteForm>;
+export type MeetingCreateFormValues = ReturnType<typeof newMeetingCreateForm>;
 export function validateOnsiteForm(
-  values: OnsiteFormValues,
+  values: MeetingCreateFormValues,
   memberIds: readonly string[],
   now = new Date(),
 ) {
@@ -93,7 +93,7 @@ export function validateOnsiteForm(
   return { fields, payload };
 }
 export function validateOnlineForm(
-  values: OnsiteFormValues,
+  values: MeetingCreateFormValues,
   memberIds: readonly string[],
   now = new Date(),
 ) {
@@ -107,13 +107,13 @@ export function validateOnlineForm(
     result.fields.joinUrl = "Enter a valid HTTPS meeting link.";
   return { fields: result.fields, payload };
 }
-export function useOnsiteForm() {
+export function useMeetingCreateForm() {
   const auth = useCurrentIdentity();
-  const save = useOnsiteCreate();
+  const save = useMeetingCreate();
   const picker = useMemberPicker(save.locked);
   const [format, setFormat] = useState<"ONSITE" | "ONLINE">("ONSITE");
   const [dirty, setDirty] = useState(false);
-  const [values, setValues] = useState(newOnsiteForm);
+  const [values, setValues] = useState(newMeetingCreateForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     let owner = authController.getSnapshot().session?.user.id;
@@ -139,16 +139,16 @@ export function useOnsiteForm() {
           : null;
       if (owner !== next) {
         owner = next;
-        setValues(newOnsiteForm());
+        setValues(newMeetingCreateForm());
         setErrors({});
         setFormat("ONSITE");
         setDirty(false);
       }
     });
   }, []);
-  function change<K extends keyof OnsiteFormValues>(
+  function change<K extends keyof MeetingCreateFormValues>(
     key: K,
-    value: OnsiteFormValues[K],
+    value: MeetingCreateFormValues[K],
   ) {
     if (!save.locked) {
       setValues((previous) => ({

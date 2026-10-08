@@ -6,16 +6,16 @@ import { useRouter } from "next/navigation";
 import { authController } from "@/hooks/authController";
 import {
   bangkokToday,
-  useOnsiteForm,
-  type OnsiteFormValues,
-} from "@/hooks/useOnsiteForm";
+  useMeetingCreateForm,
+  type MeetingCreateFormValues,
+} from "@/hooks/useMeetingCreateForm";
 import { TeamPicker } from "./TeamPicker";
 import { DatePicker } from "./DatePicker";
 import { TimeRangePicker } from "./TimeRangePicker";
 import styles from "../onsite-form.module.css";
 
-export function OnsiteForm() {
-  const form = useOnsiteForm(),
+export function MeetingCreateForm() {
+  const form = useMeetingCreateForm(),
     { auth, save, values, errors } = form;
   const session = auth.usableSession;
   const formElement = useRef<HTMLFormElement>(null);
@@ -81,7 +81,7 @@ export function OnsiteForm() {
       </main>
     );
   const field = (
-    key: keyof OnsiteFormValues,
+    key: keyof MeetingCreateFormValues,
     label: string,
     required = false,
     multiline = false,
@@ -303,7 +303,7 @@ export function OnsiteForm() {
                     onChange={(event) =>
                       form.change(
                         "status",
-                        event.target.value as OnsiteFormValues["status"],
+                        event.target.value as MeetingCreateFormValues["status"],
                       )
                     }
                   >
