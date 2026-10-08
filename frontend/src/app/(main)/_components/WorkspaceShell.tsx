@@ -25,6 +25,7 @@ export function WorkspaceShell({
   const accountToggle = useRef<HTMLButtonElement>(null);
   const account = useRef<HTMLDivElement>(null);
   const logout = useRef<HTMLButtonElement>(null);
+  const accountPointerActive = useRef(false);
   const identity = user?.displayName ?? "";
 
   function closeMenu(restoreFocus = false) {
@@ -51,14 +52,39 @@ export function WorkspaceShell({
   useEffect(() => {
     if (!menu) return;
     const outside = (event: PointerEvent) => {
+      accountPointerActive.current = !!account.current?.contains(
+        event.target as Node,
+      );
       if (
         menu === "account" &&
         !account.current?.contains(event.target as Node)
       )
         setMenu(null);
     };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
+    const releasePointer = () => {
+      accountPointerActive.current = false;
+    };
+    const releaseOutside = (event: PointerEvent) => {
+      if (!account.current?.contains(event.target as Node)) {
+        releasePointer();
+        if (menu === "account") setMenu(null);
+      }
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("pointerup", releaseOutside);
+    document.addEventListener("click", releasePointer);
+    document.addEventListener("pointercancel", releasePointer);
+    document.addEventListener("keydown", releasePointer, true);
+    window.addEventListener("blur", releasePointer);
+    return () => {
+      releasePointer();
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("pointerup", releaseOutside);
+      document.removeEventListener("click", releasePointer);
+      document.removeEventListener("pointercancel", releasePointer);
+      document.removeEventListener("keydown", releasePointer, true);
+      window.removeEventListener("blur", releasePointer);
+    };
   }, [menu]);
 
   return (
@@ -126,6 +152,9 @@ export function WorkspaceShell({
           ref={account}
           className={styles.account}
           onBlur={(event) => {
+            // A touch can blur without a new focus target before click fires.
+            // Keep the menu mounted through pointerup until its click fires.
+            if (!event.relatedTarget && accountPointerActive.current) return;
             if (
               !event.currentTarget.contains(event.relatedTarget as Node | null)
             )

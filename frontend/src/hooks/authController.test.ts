@@ -215,7 +215,7 @@ describe("single-page auth response ordering (mocked API)", () => {
     await auth.login("new", "test");
     expect(api.login).toHaveBeenCalledTimes(1);
   });
-  it("attempts final clear even if the early cancellation request failed", async () => {
+  it("accepts acknowledged final cleanup after an early cancellation failure", async () => {
     const completion = deferred<void>();
     const logout = vi
       .fn()
@@ -228,9 +228,13 @@ describe("single-page auth response ordering (mocked API)", () => {
     completion.resolve();
     await Promise.all([login, out]);
     expect(logout).toHaveBeenCalledTimes(2);
-    expect(auth.getSnapshot().logoutRequired).toBe(true);
-    await auth.logout();
-    expect(auth.getSnapshot().logoutRequired).toBe(false);
+    expect(auth.getSnapshot()).toMatchObject({
+      status: "anonymous",
+      session: null,
+      pending: null,
+      error: null,
+      logoutRequired: false,
+    });
   });
   it("deduplicates repeated logout and discards old identity reads", async () => {
     const read = deferred<Session>();

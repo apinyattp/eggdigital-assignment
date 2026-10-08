@@ -36,15 +36,16 @@ jobs:
       - name: Install navigation test browser
         run: npx playwright install --with-deps chromium
       - name: Test authenticated navigation loading
+        timeout-minutes: 5
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           NEXT_PUBLIC_API_BASE_URL: /api/v1
           API_PROXY_ORIGIN: https://backend.invalid
           FE_TEST_ORIGIN: http://127.0.0.1:3100
         run: |
-          npm run start -- --port 3100 > /tmp/navigation-frontend.log 2>&1 &
+          node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100 > /tmp/navigation-frontend.log 2>&1 &
           navigation_server_pid=$!
-          trap 'kill "$navigation_server_pid" 2>/dev/null || true' EXIT
+          trap 'kill "$navigation_server_pid" 2>/dev/null || true; wait "$navigation_server_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent "$FE_TEST_ORIGIN/login" > /dev/null; then break; fi
             sleep 1

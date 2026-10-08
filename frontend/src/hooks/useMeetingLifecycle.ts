@@ -34,7 +34,10 @@ type State = {
   writePending: boolean;
   error: string | null;
 };
-const empty = (meetingId: string, owner: string | null): State => ({
+const initialLifecycleState = (
+  meetingId: string,
+  owner: string | null,
+): State => ({
   meetingId,
   owner,
   action: null,
@@ -44,13 +47,15 @@ const empty = (meetingId: string, owner: string | null): State => ({
   writePending: false,
   error: null,
 });
-const identity = (auth: AuthSnapshot) =>
+const authenticatedMemberId = (auth: AuthSnapshot) =>
   auth.status === "authenticated" &&
   !auth.pending &&
   !auth.logoutRequired &&
   auth.session?.user.membership === "member"
     ? auth.session.user.id
     : null;
+type ReadMode = "confirmation" | "readback" | "reconciliation";
+
 type Actions = {
   prepare: (action: LifecycleAction, creatorId: string) => Promise<void>;
   close: () => void;
@@ -65,70 +70,86 @@ export function useMeetingLifecycle(
   api: Pick<typeof meetingsApi, "read" | "cancel" | "delete"> = meetingsApi,
 ) {
   const auth = useAuth(),
-    owner = identity(auth);
-  const [state, setState] = useState<State>(() => empty(meetingId, null));
+    owner = authenticatedMemberId(auth);
+  const [state, setState] = useState<State>(() =>
+    initialLifecycleState(meetingId, null),
+  );
   const actions = useRef<Actions | null>(null);
   useEffect(() => {
     let active = true,
       generation = 0,
       readAbort: AbortController | null = null,
-      current = empty(meetingId, null),
+      current = initialLifecycleState(meetingId, null),
       pendingWrite: symbol | null = null;
-    const publish = (next: State) => {
+    const updateLifecycleState = (next: State) => {
       current = next;
       if (active) setState(next);
     };
-    const invalidate = () => {
+    const invalidateOperations = () => {
       generation++;
       readAbort?.abort();
       readAbort = null;
     };
-    const valid = (ticket: number, author: string) =>
+    const isCurrentOperation = (operationGeneration: number, ownerId: string) =>
       active &&
-      ticket === generation &&
-      current.owner === author &&
-      identity(authController.getSnapshot()) === author;
-    const allowed = () =>
+      operationGeneration === generation &&
+      current.owner === ownerId &&
+      authenticatedMemberId(authController.getSnapshot()) === ownerId;
+    const isCurrentOwnerAuthenticated = () =>
       current.owner !== null &&
-      identity(authController.getSnapshot()) === current.owner;
-    function verify(meeting: Meeting, author: string) {
+      authenticatedMemberId(authController.getSnapshot()) === current.owner;
+    function validateCreatorMeeting(meeting: Meeting, ownerId: string) {
       if (meeting.id !== meetingId)
         throw new MeetingError("INVALID_RESPONSE", 200);
-      if (meeting.creatorId !== author)
+      if (meeting.creatorId !== ownerId)
         throw new MeetingError("MEETING_NOT_FOUND", 404);
       return meeting;
     }
-    async function read(reconcile: boolean, readback = false) {
-      const author = current.owner;
-      if (!author || !allowed() || !current.action || current.writePending)
+    async function readMeeting(mode: ReadMode) {
+      const ownerId = current.owner;
+      if (
+        !ownerId ||
+        !isCurrentOwnerAuthenticated() ||
+        !current.action ||
+        current.writePending
+      )
         return;
-      invalidate();
-      const ticket = generation;
+      invalidateOperations();
+      const operationGeneration = generation;
       readAbort = new AbortController();
-      publish({
+      updateLifecycleState({
         ...current,
-        phase: readback ? "readback" : reconcile ? "reconciling" : "loading",
+        phase:
+          mode === "readback"
+            ? "readback"
+            : mode === "reconciliation"
+              ? "reconciling"
+              : "loading",
         latest: null,
         error: null,
       });
       try {
-        const meeting = verify(
+        const meeting = validateCreatorMeeting(
           await api.read(meetingId, readAbort.signal),
-          author,
+          ownerId,
         );
-        if (!valid(ticket, author)) return;
-        publish(
-          reconcile
+        if (!isCurrentOperation(operationGeneration, ownerId)) return;
+        updateLifecycleState(
+          mode === "reconciliation"
             ? { ...current, phase: "reconcile", latest: meeting }
-            : { ...current, phase: readback ? "complete" : "confirm", meeting },
+            : {
+                ...current,
+                phase: mode === "readback" ? "complete" : "confirm",
+                meeting,
+              },
         );
       } catch (error) {
-        if (!valid(ticket, author)) return;
+        if (!isCurrentOperation(operationGeneration, ownerId)) return;
         if (
           error instanceof MeetingError &&
           [401, 403, 404].includes(error.status ?? 0)
         )
-          publish({
+          updateLifecycleState({
             ...current,
             phase: "unavailable",
             meeting: null,
@@ -136,23 +157,24 @@ export function useMeetingLifecycle(
             error: error.code,
           });
         else
-          publish({
+          updateLifecycleState({
             ...current,
-            phase: readback
-              ? "readback-error"
-              : reconcile
-                ? "reconcile-error"
-                : "read-error",
+            phase:
+              mode === "readback"
+                ? "readback-error"
+                : mode === "reconciliation"
+                  ? "reconcile-error"
+                  : "read-error",
             error: error instanceof MeetingError ? error.code : "NETWORK_ERROR",
           });
       } finally {
-        if (ticket === generation) readAbort = null;
+        if (operationGeneration === generation) readAbort = null;
       }
     }
     function reconcileIdentity() {
       if (!active) return;
       const snapshot = authController.getSnapshot(),
-        next = identity(snapshot),
+        next = authenticatedMemberId(snapshot),
         denied =
           snapshot.error instanceof AuthError &&
           [401, 403].includes(snapshot.error.status ?? 0);
@@ -162,37 +184,40 @@ export function useMeetingLifecycle(
         (snapshot.status === "checking" ||
           (snapshot.status === "error" && !denied))
       ) {
-        invalidate();
+        invalidateOperations();
         const interrupted: Partial<Record<Phase, Phase>> = {
           saving: "unknown",
           loading: "read-error",
           readback: "readback-error",
           reconciling: "reconcile-error",
         };
-        publish({
+        updateLifecycleState({
           ...current,
           phase: interrupted[current.phase] ?? current.phase,
         });
       } else if (next !== current.owner || !next) {
-        invalidate();
+        invalidateOperations();
         pendingWrite = null;
-        publish(empty(meetingId, next));
+        updateLifecycleState(initialLifecycleState(meetingId, next));
       }
     }
     actions.current = {
       async prepare(action, creatorId) {
         if (
-          !allowed() ||
+          !isCurrentOwnerAuthenticated() ||
           current.owner !== creatorId ||
           current.phase !== "idle"
         )
           return;
-        publish({ ...empty(meetingId, current.owner), action });
-        await read(false);
+        updateLifecycleState({
+          ...initialLifecycleState(meetingId, current.owner),
+          action,
+        });
+        await readMeeting("confirmation");
       },
       close() {
         if (
-          allowed() &&
+          isCurrentOwnerAuthenticated() &&
           [
             "loading",
             "read-error",
@@ -202,28 +227,28 @@ export function useMeetingLifecycle(
           ].includes(current.phase) &&
           !current.writePending
         ) {
-          invalidate();
-          publish(empty(meetingId, current.owner));
+          invalidateOperations();
+          updateLifecycleState(initialLifecycleState(meetingId, current.owner));
         }
       },
       async confirm() {
-        const author = current.owner,
+        const ownerId = current.owner,
           meeting = current.meeting,
           action = current.action;
         if (
-          !author ||
-          !allowed() ||
+          !ownerId ||
+          !isCurrentOwnerAuthenticated() ||
           current.phase !== "confirm" ||
           !meeting ||
           !action ||
           current.writePending
         )
           return;
-        invalidate();
-        const ticket = generation,
-          write = Symbol();
-        pendingWrite = write;
-        publish({
+        invalidateOperations();
+        const operationGeneration = generation,
+          writeId = Symbol();
+        pendingWrite = writeId;
+        updateLifecycleState({
           ...current,
           phase: "saving",
           writePending: true,
@@ -234,28 +259,28 @@ export function useMeetingLifecycle(
             await api.delete(meetingId, meeting.updatedAt);
           } else {
             const saved = await api.cancel(meetingId, meeting.updatedAt);
-            if (!valid(ticket, author)) {
+            if (!isCurrentOperation(operationGeneration, ownerId)) {
               return;
             }
-            verify(saved, author);
+            validateCreatorMeeting(saved, ownerId);
             if (saved.status !== "CANCELLED") {
               throw new MeetingError("INVALID_RESPONSE", 200);
             }
           }
-          if (!valid(ticket, author)) return;
-          publish({
+          if (!isCurrentOperation(operationGeneration, ownerId)) return;
+          updateLifecycleState({
             ...current,
             phase: action === "delete" ? "complete" : "readback",
             writePending: false,
           });
-          if (action === "cancel") await read(false, true);
+          if (action === "cancel") await readMeeting("readback");
         } catch (error) {
-          if (!valid(ticket, author)) return;
+          if (!isCurrentOperation(operationGeneration, ownerId)) return;
           if (
             error instanceof MeetingError &&
             [401, 403, 404].includes(error.status ?? 0)
           )
-            publish({
+            updateLifecycleState({
               ...current,
               phase: "unavailable",
               meeting: null,
@@ -264,7 +289,7 @@ export function useMeetingLifecycle(
               error: error.code,
             });
           else if (error instanceof MeetingError && error.status === 409)
-            publish({
+            updateLifecycleState({
               ...current,
               phase: "conflict",
               writePending: false,
@@ -274,14 +299,14 @@ export function useMeetingLifecycle(
             error instanceof MeetingError &&
             [400, 415].includes(error.status ?? 0)
           )
-            publish({
+            updateLifecycleState({
               ...current,
               phase: "confirm",
               writePending: false,
               error: error.code,
             });
           else
-            publish({
+            updateLifecycleState({
               ...current,
               phase: "unknown",
               writePending: false,
@@ -289,24 +314,29 @@ export function useMeetingLifecycle(
                 error instanceof MeetingError ? error.code : "NETWORK_ERROR",
             });
         } finally {
-          if (pendingWrite === write) {
+          if (pendingWrite === writeId) {
             pendingWrite = null;
-            if (active && current.owner === author && current.writePending)
-              publish({ ...current, writePending: false });
+            if (active && current.owner === ownerId && current.writePending)
+              updateLifecycleState({ ...current, writePending: false });
           }
         }
       },
       async retry() {
-        if (current.phase === "read-error") await read(false);
-        else if (current.phase === "readback-error") await read(false, true);
+        if (current.phase === "read-error") await readMeeting("confirmation");
+        else if (current.phase === "readback-error")
+          await readMeeting("readback");
         else if (
           ["unknown", "conflict", "reconcile-error"].includes(current.phase)
         )
-          await read(true);
+          await readMeeting("reconciliation");
       },
       reviewLatest() {
-        if (allowed() && current.phase === "reconcile" && current.latest)
-          publish({
+        if (
+          isCurrentOwnerAuthenticated() &&
+          current.phase === "reconcile" &&
+          current.latest
+        )
+          updateLifecycleState({
             ...current,
             meeting: current.latest,
             latest: null,
@@ -315,9 +345,13 @@ export function useMeetingLifecycle(
           });
       },
       useLatest() {
-        if (allowed() && current.phase === "reconcile" && current.latest) {
-          invalidate();
-          publish(empty(meetingId, current.owner));
+        if (
+          isCurrentOwnerAuthenticated() &&
+          current.phase === "reconcile" &&
+          current.latest
+        ) {
+          invalidateOperations();
+          updateLifecycleState(initialLifecycleState(meetingId, current.owner));
         }
       },
     };
@@ -325,7 +359,7 @@ export function useMeetingLifecycle(
     queueMicrotask(reconcileIdentity);
     return () => {
       active = false;
-      invalidate();
+      invalidateOperations();
       unsubscribe();
       actions.current = null;
     };
@@ -333,7 +367,7 @@ export function useMeetingLifecycle(
   const visible =
     owner !== null && owner === state.owner && state.meetingId === meetingId;
   return {
-    ...(visible ? state : empty(meetingId, null)),
+    ...(visible ? state : initialLifecycleState(meetingId, null)),
     visible,
     prepare: (action: LifecycleAction, creatorId: string) =>
       actions.current?.prepare(action, creatorId),
