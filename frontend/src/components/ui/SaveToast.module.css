@@ -1,0 +1,98 @@
+.toast {
+  position: fixed;
+  z-index: 1200;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 10px 12px 16px;
+  gap: 12px;
+  border-radius: 20px;
+  background: #f3faf5;
+  color: #204d34;
+  border: 1px solid #d8e9de;
+  box-shadow: 0 8px 28px #244c331a;
+  pointer-events: auto;
+  line-height: 1.5;
+}
+.toast svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  color: #247a4c;
+}
+.icon svg {
+  width: 28px;
+  height: 28px;
+}
+.message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.message strong {
+  font-weight: 500;
+}
+.toast .dismiss {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 11px;
+  background: transparent;
+  color: #426550;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+}
+.toast .dismiss:hover {
+  background: #e2f0e7;
+}
+.dismiss svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  stroke-width: 1.8;
+}
+.dismiss:focus-visible {
+  outline: 3px solid #6033b3;
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .toast {
+    right: 16px;
+    bottom: 16px;
+    padding: 10px 8px 10px 14px;
+    gap: 10px;
+    border-radius: 18px;
+  }
+  .message {
+    font-size: 13px;
+  }
+}
+
+.toast.error {
+  background: #fdeceb;
+  color: #b3261e;
+  border-color: #b3261e;
+  box-shadow: 0 8px 28px #b3261e1a;
+}
+.toast.error .icon,
+.toast.error .dismiss {
+  color: #b3261e;
+}
+.toast.error .dismiss:hover {
+  background: #f9dad8;
+}

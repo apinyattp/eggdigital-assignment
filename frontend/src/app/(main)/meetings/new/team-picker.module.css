@@ -1,0 +1,145 @@
+/* Pinned S1 team picker: revision-flow.css and existing high-fidelity controls. */
+.picker {
+  position: relative;
+  min-width: 0;
+  --team-line: #dad6e0;
+  --team-soft: #f8f6fa;
+}
+.picker label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #353039;
+}
+.picker input {
+  width: 100%;
+  min-height: 47px;
+  padding: 11px 13px;
+  border: 1px solid #b3aabb;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 14px;
+}
+.picker input::placeholder {
+  color: #68636e;
+}
+.picker input[aria-invalid="true"] {
+  border-color: #b3261e;
+}
+.picker :disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.picker input:disabled {
+  opacity: 1;
+  color: #5f5b66;
+  background: #f5f3f7;
+}
+.picker :focus-visible {
+  outline-offset: 3px;
+}
+.options {
+  border: 1px solid var(--team-line);
+  border-radius: 12px;
+  background: #fff;
+  margin-top: 6px;
+  max-height: 270px;
+  overflow: auto;
+}
+.option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  min-height: 60px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--team-line);
+}
+.option:hover {
+  background: var(--team-soft);
+}
+.option.active {
+  background: #fff7d6;
+}
+.avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 500;
+}
+.details {
+  flex: 1;
+  min-width: 0;
+}
+.details strong,
+.details small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.details strong {
+  font-size: 14px;
+}
+.details small {
+  font-size: 12px;
+  color: #5f5b66;
+}
+.selection {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+}
+.selection:empty {
+  display: none;
+}
+.member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--team-line);
+  min-height: 68px;
+}
+.picker .member button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 24px;
+  color: #5f5b66;
+}
+.picker .member button:hover {
+  background: var(--team-soft);
+}
+.help {
+  margin: 5px 0 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #666;
+}
+.empty {
+  padding: 16px;
+  font-size: 13px;
+}
+.action {
+  border: 1px solid var(--team-line);
+  border-radius: 10px;
+  background: #efefeb;
+  color: #383833;
+  font-size: 13px;
+  min-height: 44px;
+}
+.action:hover {
+  background: #e5e5de;
+}
+.error {
+  color: #b3261e;
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+}

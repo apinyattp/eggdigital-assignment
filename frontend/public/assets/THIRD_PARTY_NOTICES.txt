@@ -1,0 +1,15 @@
+Login visual assets
+
+EGG Digital logo: existing project-approved brand asset, preserved unchanged.
+Google G: official Google Sign-in branding asset, preserved unchanged at 20x20.
+https://developers.google.com/identity/branding-guidelines
+https://developers.google.com/static/identity/images/signin-assets.zip
+
+IBM Plex Sans Thai and Rubik: Google Fonts; SIL Open Font License 1.1.
+https://github.com/google/fonts/tree/main/ofl/ibmplexsansthai
+https://github.com/google/fonts/tree/main/ofl/rubik
+See fonts/IBM-Plex-Sans-Thai-OFL.txt and fonts/Rubik-OFL.txt.
+Google Sans Medium: Google Fonts; see fonts/Google-Sans-OFL.txt.
+
+Only fonts and brand artwork are included. No prototype authentication or
+account fixtures are included with these assets.

@@ -1,2 +1,6 @@
 # Local credentials
 /.env
+/backend/.local.env
+/backend/.bridge.local.env
+**/node_modules/
+**/coverage/

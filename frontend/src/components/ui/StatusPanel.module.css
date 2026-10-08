@@ -1,0 +1,32 @@
+.landing {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--page-bg, #f9faf4);
+}
+.landingCard {
+  width: 100%;
+  max-width: 680px;
+  padding: 36px;
+  border: 1px solid #e8e7df;
+  border-radius: 28px;
+  background: #fff;
+  box-shadow: 0 16px 48px #2222220b;
+}
+.landingCard h1 {
+  font-weight: 500;
+  font-size: 25px;
+  line-height: 1.35;
+}
+.landingCard h2 {
+  font-weight: 500;
+  font-size: 21px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .landingCard {
+    padding: 26px 20px;
+    border-radius: 22px;
+  }
+}
