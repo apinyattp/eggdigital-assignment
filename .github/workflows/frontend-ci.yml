@@ -33,15 +33,16 @@ jobs:
           # Reserved test hostname: build validates routing without contacting BE.
           API_PROXY_ORIGIN: https://backend.invalid
         run: npm run build
-      - name: Install navigation test browser
-        run: npx playwright install --with-deps chromium
-      - name: Test authenticated navigation loading
+      - name: Install frontend regression browsers
+        run: npx playwright install --with-deps chromium webkit
+      - name: Test navigation and member pagination
         timeout-minutes: 5
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           NEXT_PUBLIC_API_BASE_URL: /api/v1
           API_PROXY_ORIGIN: https://backend.invalid
           FE_TEST_ORIGIN: http://127.0.0.1:3100
+          PICKER_BROWSERS: chromium,webkit
         run: |
           node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100 > /tmp/navigation-frontend.log 2>&1 &
           navigation_server_pid=$!
@@ -51,6 +52,7 @@ jobs:
             sleep 1
           done
           npm run test:navigation
+          npm run test:member-picker
       - name: Build production image
         run: >-
           docker build --target runtime
