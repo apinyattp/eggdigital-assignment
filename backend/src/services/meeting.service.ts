@@ -495,10 +495,14 @@ export class MeetingService {
       );
       input.attendeeChanges.removeEmails = [...new Set(input.attendeeChanges.removeEmails)];
     }
-    const current = await this.model.findById(user.id, meetingId as string);
-    if (input.joinUrl !== undefined && !current) throw new ApiError(404, 'MEETING_NOT_FOUND');
-    if (input.joinUrl !== undefined && current?.format !== 'ONLINE') {
-      throw new ApiError(400, 'VALIDATION_ERROR', { joinUrl: 'ใช้ลิงก์ได้เฉพาะการประชุมออนไลน์' });
+    if (input.joinUrl !== undefined) {
+      const current = await this.model.findById(user.id, meetingId as string);
+      if (!current) throw new ApiError(404, 'MEETING_NOT_FOUND');
+      if (current.format !== 'ONLINE') {
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          joinUrl: 'ใช้ลิงก์ได้เฉพาะการประชุมออนไลน์',
+        });
+      }
     }
     return { meeting: await this.model.mutate(user.id, meetingId as string, input) };
   }
