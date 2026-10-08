@@ -306,11 +306,11 @@ describe("Date picker repeated rendering", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select year" }));
     fireEvent.click(screen.getByRole("button", { name: "Next years" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "2028", exact: true }),
+      screen.getByRole("button", { name: "2028" }),
     );
     expect(formatting).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByRole("button", { name: "Feb", exact: true }),
+      screen.getByRole("button", { name: "Feb" }),
     );
     expect(formatting).toHaveBeenCalledTimes(42);
     expect(
