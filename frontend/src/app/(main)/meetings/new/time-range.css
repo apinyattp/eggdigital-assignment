@@ -48,6 +48,11 @@
   outline: 3px solid #6033b3;
   outline-offset: 2px;
 }
+/* WebKit gives programmatic wheel focus a focus-visible ring after a tap.
+   Suppress only pointer-origin wheel focus; keyboard focus keeps its outline. */
+.time-range-dialog[data-pointer-focus="true"] [role="spinbutton"]:focus {
+  outline: none;
+}
 .time-range-dialog .range-close {
   position: absolute;
   right: 8px;

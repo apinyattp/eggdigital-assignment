@@ -306,13 +306,32 @@ for (const engine of engines) {
             name: "Hour",
             exact: true,
           });
+          assert.equal(
+            await hour.evaluate((element) => getComputedStyle(element).outlineStyle),
+            "none",
+            "A touch or mouse opening must not leave purple wheel-edge strokes",
+          );
+          if (process.env.PICKER_SCREENSHOT_DIR && variant === "filled" && action === "Cancel") {
+            await page.waitForTimeout(350);
+            await page.screenshot({ path: `${process.env.PICKER_SCREENSHOT_DIR}/${engine}-wheel-pointer.png` });
+          }
           await hour.press("ArrowDown");
           await assertKeyboardRing(hour);
+          if (process.env.PICKER_SCREENSHOT_DIR && variant === "filled" && action === "Cancel") {
+            await page.screenshot({ path: `${process.env.PICKER_SCREENSHOT_DIR}/${engine}-wheel-keyboard.png` });
+          }
           const minute = dialog.getByRole("spinbutton", {
             name: "Minute",
             exact: true,
           });
+          await tap(minute);
+          assert.equal(
+            await minute.evaluate((element) => getComputedStyle(element).outlineStyle),
+            "none",
+            "Returning to pointer input suppresses only the wheel outline",
+          );
           await minute.press("End");
+          await assertKeyboardRing(minute);
           await snapshot(`time draft before ${action}`);
           await tap(dialog.getByRole("button", { name: action, exact: true }));
           await dialog.waitFor({ state: "hidden" });
