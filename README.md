@@ -1,5 +1,12 @@
 # eggdigital-assignment
 
+| รายการ | ลิงก์ |
+|---|---|
+| Production Front End | [เปิดหน้า Login](https://frontend-production-1564.up.railway.app/login) |
+| Production Back End | [API](https://backend-production-9356.up.railway.app/api/v1) · [Health](https://backend-production-9356.up.railway.app/api/v1/health/ready) |
+| Wireframe | [เปิด Wireframe](https://apinyattp.github.io/eggdigital-assignment/doc/) |
+| UI design | [เปิด UI design](https://apinyattp.github.io/eggdigital-assignment/doc/ui-design.html) |
+
 ## 1. Flow
 
 ```mermaid

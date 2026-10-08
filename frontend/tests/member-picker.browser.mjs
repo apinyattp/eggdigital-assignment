@@ -40,8 +40,6 @@ const meeting = {
   organizer: { id: "owner", displayName: "Synthetic Owner" },
   attendeeCount: 0,
   attendees: [],
-  meetingProvider: null,
-  externalMeetingId: null,
   createdAt: "2026-10-07T03:00:00Z",
   updatedAt: "2026-10-08T03:00:00Z",
 };
