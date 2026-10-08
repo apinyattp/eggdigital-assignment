@@ -1,5 +1,11 @@
 # eggdigital-assignment
 
+##URL
+| Method | Path
+|---|---|
+| Frontend | [https://frontend-production-1564.up.railway.app/login](https://backend-production-9356.up.railway.app/api/v1/)
+| Backend | [https://backend-production-9356.up.railway.app/](https://backend-production-9356.up.railway.app/api/v1)
+
 ## Application flow overview
 1. **Login:** an existing Member signs in with a password or an eligible Google account. NextAuth handles the browser login; the backend verifies membership and issues the API JWT. Candidate identities are denied, including an email that also appears as a Member. Google login does not register new Members.
 2. **Dashboard:** the Member selects a date and sees meetings they created or attend, grouped as upcoming/current, rejected/cancelled, and past. Upcoming/current meetings use numeric pages of 10. Dates are interpreted in `Asia/Bangkok`.
