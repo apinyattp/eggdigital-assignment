@@ -35,7 +35,7 @@ jobs:
         run: npm run build
       - name: Install frontend regression browsers
         run: npx playwright install --with-deps chromium webkit
-      - name: Test navigation, member pagination, and date/time pickers
+      - name: Test navigation, member pagination, date/time pickers, and mobile Login
         timeout-minutes: 5
         env:
           NEXT_TELEMETRY_DISABLED: "1"
@@ -54,6 +54,7 @@ jobs:
           npm run test:navigation
           npm run test:member-picker
           npm run test:date-time-picker
+          npm run test:login-mobile
       - name: Build production image
         run: >-
           docker build --target runtime
