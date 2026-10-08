@@ -4,6 +4,7 @@ import {
   render,
   renderHook,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSnapshot } from "./authController";
@@ -152,7 +153,7 @@ async function fillPage() {
       { target: { value: "Member" } },
     );
   });
-  fireEvent.click(screen.getByRole("option", { name: /Member One/ }));
+  fireEvent.click(await screen.findByRole("option", { name: /Member One/ }));
 }
 describe("TQA-D01/D02 Add page recovery — mocked HTTP, real form/picker hooks", () => {
   it("writes once only after explicit valid Save and then opens confirmed Detail", async () => {
@@ -295,7 +296,9 @@ describe("TQA-D01/D02 Add page recovery — mocked HTTP, real form/picker hooks"
         result.current.change("preparationNotes", "Private preparation");
       });
       await act(async () => result.current.picker.setQuery("Member"));
+      await waitFor(() => expect(result.current.picker.items).toEqual([member]));
       act(() => result.current.picker.select(member.id));
+      expect(result.current.picker.selected).toEqual([member]);
       act(() => emit(next));
       act(() => emit(identity()));
       expect(result.current.values.title).toBe("");
@@ -424,6 +427,7 @@ describe("Add Save time/link boundaries at frozen Bangkok 2030-01-01 09:30", () 
       );
     });
     await act(async () => hook.result.current.picker.setQuery("Member"));
+    await waitFor(() => expect(hook.result.current.picker.items).toEqual([member]));
     act(() => hook.result.current.picker.select(member.id));
     expect(hook.result.current.picker.selected).toHaveLength(1);
     return hook;
