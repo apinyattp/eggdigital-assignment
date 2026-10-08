@@ -157,6 +157,21 @@ await page.route("**/api/auth/**", async (route) => {
   failures.push(`Unexpected auth request ${path}`);
   return reply(route, 500, {});
 });
+// Let Next prefetch its native loading boundary, then hold the actual route
+// response so this exercises App Router loading rather than only API loading.
+const meetingRouteGate = deferred();
+let holdMeetingRoute = true;
+await page.route("**/meetings/meeting?**", async (route) => {
+  const headers = route.request().headers();
+  if (
+    holdMeetingRoute &&
+    headers.rsc === "1" &&
+    !headers["next-router-prefetch"]
+  ) {
+    await meetingRouteGate.promise;
+  }
+  await route.continue();
+});
 const loader = page.locator("[data-workspace-loading]");
 const navigation = page.getByRole("navigation", {
   name: "Workspace navigation",
@@ -205,6 +220,13 @@ try {
   await release("sessionGate");
   await page.getByText("Loading interviews…", { exact: true }).waitFor();
   await shellIsStable();
+  const prefetchedMeeting = page.waitForResponse((response) => {
+    const request = response.request();
+    return (
+      new URL(request.url()).pathname === "/meetings/meeting" &&
+      request.headers()["next-router-prefetch"] === "1"
+    );
+  });
   await release("listGate");
   await page
     .getByRole("link", { name: "View Synthetic Candidate meeting" })
@@ -214,11 +236,28 @@ try {
     "PASS delayed identity/list reads use shared content loading; shell persists",
   );
 
+  await (await prefetchedMeeting).finished();
   state.summaryGate = deferred();
+  const routeRequested = page.waitForRequest((request) => {
+    const headers = request.headers();
+    return (
+      new URL(request.url()).pathname === "/meetings/meeting" &&
+      headers.rsc === "1" &&
+      !headers["next-router-prefetch"]
+    );
+  });
   await page
     .getByRole("link", { name: "View Synthetic Candidate meeting" })
     .click();
+  await routeRequested;
+  await page.getByText("Loading page…", { exact: true }).waitFor();
+  await shellIsStable();
+  holdMeetingRoute = false;
+  meetingRouteGate.resolve();
   await page.getByText("Loading meeting details…", { exact: true }).waitFor();
+  console.log(
+    "PASS actual RSC navigation shows native route loading with the same shell",
+  );
   await shellIsStable();
   // Leave before the response: an abandoned request must not keep a global flag set.
   await navigation.getByRole("link", { name: "Add New Meeting" }).click();
@@ -315,6 +354,8 @@ try {
   );
   assert.deepEqual(failures, []);
 } finally {
+  holdMeetingRoute = false;
+  meetingRouteGate.resolve();
   for (const name of ["sessionGate", "listGate", "summaryGate"])
     await release(name);
   await context.close();
