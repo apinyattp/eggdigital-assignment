@@ -1,0 +1,69 @@
+name: Real-stack E2E
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Case selection (full is the pre-release check)
+        type: choice
+        options: [full, critical]
+        default: full
+        required: true
+
+run-name: "Real-stack E2E · ${{ github.event_name == 'workflow_dispatch' && inputs.profile || (contains(github.event.pull_request.labels.*.name, 'e2e:full') && 'full' || 'critical') }} · ${{ github.head_ref || github.ref_name }}"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Real-stack E2E (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - name: Type-check the database fixture
+        run: npm --prefix backend run typecheck:e2e
+      - name: Verify case selection and critical coverage
+        run: npm --prefix frontend run test:e2e:selection
+      - name: Install browser and host dependencies
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps ${{ matrix.browser }}
+      - name: Exercise the real frontend, API and isolated database
+        env:
+          E2E_BROWSERS: ${{ matrix.browser }}
+          # Ordinary PR/main checks select tags; a release dispatch or explicit
+          # PR label runs the same complete inventory without duplicating cases.
+          E2E_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || (contains(github.event.pull_request.labels.*.name, 'e2e:full') && 'full' || 'critical') }}
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/e2e-results
+        run: npm --prefix frontend run test:e2e
+      - name: Upload safe failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.browser }}-failure
+          path: |
+            ${{ runner.temp }}/e2e-results/**/*.png
+            ${{ runner.temp }}/e2e-results/**/results.json
+            ${{ runner.temp }}/e2e-results/run.json
+          if-no-files-found: ignore
+          retention-days: 3

@@ -19,7 +19,8 @@
     "setup:bridge": "node --import tsx scripts/setup-bridge.ts",
     "test:integration:isolated": "node --import tsx scripts/test-isolated.ts",
     "smoke:local": "node --import tsx scripts/smoke-local.ts",
-    "format:check": "prettier --check src tests scripts migrations package.json tsconfig.json"
+    "format:check": "prettier --check src tests scripts migrations package.json tsconfig.json",
+    "typecheck:e2e": "tsc --noEmit --target ES2023 --module NodeNext --strict --esModuleInterop --skipLibCheck --noUncheckedIndexedAccess scripts/e2e-fixture.ts"
   },
   "dependencies": {
     "argon2": "0.45.1",
