@@ -4,6 +4,13 @@ import { writeFile } from "node:fs/promises";
 import { chromium, webkit } from "playwright";
 const origin = process.env.FE_TEST_ORIGIN ?? "http://127.0.0.1:3100";
 assert.ok(["localhost", "127.0.0.1"].includes(new URL(origin).hostname));
+// Support the repository's default split localhost API as well as CI's same-origin proxy.
+// These origins are mocked only: no backend request is ever continued.
+const mockApiOrigins = new Set([
+  origin,
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+]);
 const engines = (process.env.PICKER_BROWSERS ?? "chromium").split(",");
 assert.ok(
   engines.length &&
@@ -58,11 +65,16 @@ for (const engine of engines) {
       });
       await context.route("**/*", async (route) => {
         const url = new URL(route.request().url());
-        if (url.origin !== origin) {
-          errors.push("Unexpected external request");
+        if (url.origin !== origin && !mockApiOrigins.has(url.origin)) {
+          errors.push(`Blocked external request: ${route.request().method()} ${url.origin}${url.pathname}`);
           return route.abort();
         }
-        if (!url.pathname.startsWith("/api/")) return route.continue();
+        if (url.origin === origin && !url.pathname.startsWith("/api/")) return route.continue();
+        const headers = {
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Credentials": "true",
+        };
         let body;
         if (
           route.request().method() === "GET" &&
@@ -79,19 +91,19 @@ for (const engine of engines) {
           };
         else if (
           route.request().method() === "GET" &&
-          url.pathname === "/api/auth/session"
+          url.origin === origin && url.pathname === "/api/auth/session"
         )
           body = { expires: "2099-01-01T00:00:00Z" };
         else {
           errors.push(
-            `Unexpected API request ${route.request().method()} ${url.pathname}`,
+            `Blocked unexpected API request: ${route.request().method()} ${url.origin}${url.pathname}`,
           );
           return route.abort();
         }
         return route.fulfill({
           status: 200,
           contentType: "application/json",
-          headers: { "Cache-Control": "no-store" },
+          headers,
           body: JSON.stringify(body),
         });
       });
@@ -385,6 +397,14 @@ for (const engine of engines) {
         result.status = "passed";
       } catch (error) {
         result.error = error.message;
+        result.diagnostics = {
+          pageUrl: page.url(),
+          pageTitle: await page.title().catch(() => ""),
+          visiblePage: (await page.locator("main").innerText().catch(() => "")).slice(0, 1200),
+          errors,
+        };
+        if (process.env.PICKER_SCREENSHOT_DIR)
+          await page.screenshot({ path: `${process.env.PICKER_SCREENSHOT_DIR}/${engine}-${variant}-failure.png` }).catch(() => {});
       } finally {
         results.push(result);
         await context.close();
@@ -392,6 +412,7 @@ for (const engine of engines) {
       console.log(
         `${result.status === "passed" ? "PASS" : "FAIL"} ${engine} ${variant}${result.error ? `: ${result.error}` : ""}`,
       );
+      if (result.diagnostics) console.error(JSON.stringify(result.diagnostics));
     }
   } finally {
     await browser.close();
