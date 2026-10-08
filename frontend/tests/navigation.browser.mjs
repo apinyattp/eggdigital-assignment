@@ -14,6 +14,8 @@ const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
 });
 const page = await context.newPage();
+page.setDefaultTimeout(15000);
+page.setDefaultNavigationTimeout(20000);
 const failures = [];
 page.on("pageerror", (error) => failures.push(error.message));
 const member = {
@@ -236,7 +238,20 @@ try {
     "PASS delayed identity/list reads use shared content loading; shell persists",
   );
 
-  await (await prefetchedMeeting).finished();
+  let prefetchTimeout;
+  try {
+    await Promise.race([
+      (await prefetchedMeeting).finished(),
+      new Promise((_, reject) => {
+        prefetchTimeout = setTimeout(
+          () => reject(new Error("Meeting route prefetch did not finish within 20 seconds")),
+          20000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(prefetchTimeout);
+  }
   state.summaryGate = deferred();
   const routeRequested = page.waitForRequest((request) => {
     const headers = request.headers();
