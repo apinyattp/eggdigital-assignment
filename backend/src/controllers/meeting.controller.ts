@@ -13,39 +13,50 @@ export function createMeetingController(service: MeetingService) {
     },
     async editMeeting(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json(await service.editMeeting(res.locals.user, req.params.meetingId, req.body));
+        const result = await service.editMeeting(res.locals.user, req.params.meetingId, req.body);
+        res.json(result);
       } catch (error) {
         next(error);
       }
     },
     async updateTeam(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json(
-          await service.editMeeting(res.locals.user, req.params.meetingId, req.body, 'team'),
+        const result = await service.editMeeting(
+          res.locals.user,
+          req.params.meetingId,
+          req.body,
+          'team',
         );
+        res.json(result);
       } catch (error) {
         next(error);
       }
     },
     async cancelMeeting(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json(
-          await service.editMeeting(res.locals.user, req.params.meetingId, req.body, 'cancel'),
+        const result = await service.editMeeting(
+          res.locals.user,
+          req.params.meetingId,
+          req.body,
+          'cancel',
         );
+        res.json(result);
       } catch (error) {
         next(error);
       }
     },
     async listMeetings(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json(await service.listMeetings(res.locals.user, req.query));
+        const result = await service.listMeetings(res.locals.user, req.query);
+        res.json(result);
       } catch (error) {
         next(error);
       }
     },
     async getSummary(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json({ meeting: await service.findSummary(res.locals.user, req.params.meetingId) });
+        const meeting = await service.findSummary(res.locals.user, req.params.meetingId);
+        res.json({ meeting });
       } catch (error) {
         next(error);
       }
@@ -60,25 +71,24 @@ export function createMeetingController(service: MeetingService) {
     },
     async getOwnNote(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json({
-          note: await service.getOwnNote(res.locals.user, req.params.meetingId, req.query),
-        });
+        const note = await service.getOwnNote(res.locals.user, req.params.meetingId, req.query);
+        res.json({ note });
       } catch (error) {
         next(error);
       }
     },
     async saveOwnNote(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json({
-          note: await service.saveOwnNote(res.locals.user, req.params.meetingId, req.body),
-        });
+        const note = await service.saveOwnNote(res.locals.user, req.params.meetingId, req.body);
+        res.json({ note });
       } catch (error) {
         next(error);
       }
     },
     async readFeedback(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json(await service.readFeedback(res.locals.user, req.params.meetingId, req.query));
+        const result = await service.readFeedback(res.locals.user, req.params.meetingId, req.query);
+        res.json(result);
       } catch (error) {
         next(error);
       }
@@ -97,21 +107,21 @@ export function createMeetingController(service: MeetingService) {
     },
     async editFeedback(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json({
-          feedback: await service.editFeedback(
-            res.locals.user,
-            req.params.meetingId,
-            req.params.feedbackId,
-            req.body,
-          ),
-        });
+        const feedback = await service.editFeedback(
+          res.locals.user,
+          req.params.meetingId,
+          req.params.feedbackId,
+          req.body,
+        );
+        res.json({ feedback });
       } catch (error) {
         next(error);
       }
     },
     async getMeeting(req: Request, res: Response, next: NextFunction) {
       try {
-        res.json({ meeting: await service.findMeeting(res.locals.user, req.params.meetingId) });
+        const meeting = await service.findMeeting(res.locals.user, req.params.meetingId);
+        res.json({ meeting });
       } catch (error) {
         next(error);
       }
