@@ -1,0 +1,41 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [codex/feature-login, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --maxWorkers=1
+      - name: Build same-origin production frontend
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_API_BASE_URL: /api/v1
+          # Reserved test hostname: build validates routing without contacting BE.
+          API_PROXY_ORIGIN: https://backend.invalid
+        run: npm run build
+      - name: Build production image
+        run: >-
+          docker build --target runtime
+          --build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1
+          --build-arg API_PROXY_ORIGIN=https://backend.invalid
+          -t meeting-manager-frontend:ci .
