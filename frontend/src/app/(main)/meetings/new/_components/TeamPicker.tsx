@@ -68,8 +68,8 @@ export function TeamPicker({
       event.preventDefault();
       if (showOptions && picker.items.length)
         select(picker.items[Math.max(0, activeIndex)].id);
-    } else if (event.key === "Escape" || event.key === "Tab") {
-      if (event.key === "Escape") event.preventDefault();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
       setOpen(false);
       setActiveId(null);
     }
@@ -165,7 +165,17 @@ export function TeamPicker({
           type="button"
           className={styles.action}
           disabled={picker.disabled || picker.phase === "loading"}
-          onClick={picker.loadMore}
+          onPointerDown={(event) => {
+            if (event.button === 0 && event.currentTarget.disabled)
+              event.preventDefault();
+          }}
+          onMouseDown={(event) => {
+            if (event.button === 0) event.preventDefault();
+          }}
+          onClick={() => {
+            input.current?.focus({ preventScroll: true });
+            picker.loadMore();
+          }}
         >
           Load more members
         </button>
