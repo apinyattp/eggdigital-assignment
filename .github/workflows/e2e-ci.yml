@@ -21,6 +21,20 @@ permissions:
   contents: read
 
 jobs:
+  discovery-macos:
+    name: Scenario discovery (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend --include=dev
+      - name: Verify discovery and diagnostics without Docker or browsers
+        run: npm --prefix frontend run test:e2e:selection
   e2e:
     name: Real-stack E2E (${{ matrix.browser }})
     runs-on: ubuntu-latest

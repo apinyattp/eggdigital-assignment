@@ -9,8 +9,8 @@ The scenario matrix below describes assertions in the scripts, not an assertion 
 Use Node 24.19.x, npm, a POSIX shell/process environment, a local Docker daemon, and a clean checkout without application `.env` files. Remote Docker contexts are refused. The runner supplies its own application configuration and refuses local `.env` files rather than mixing test and existing settings. Install dependencies and browser binaries once:
 
 ```sh
-npm ci --prefix backend
-npm ci --prefix frontend
+npm ci --prefix backend --include=dev
+npm ci --prefix frontend --include=dev
 cd frontend
 npx --no-install playwright install chromium webkit
 cd ..
@@ -63,6 +63,25 @@ Check selection without starting Docker or a browser:
 ```sh
 npm --prefix frontend run test:e2e:selection
 ```
+
+### If scenario discovery fails
+
+Discovery registers scenario IDs before starting Docker, loading fixture credentials, or launching browsers. `Scenario discovery failed for auth` identifies the first discovery subprocess; it does not mean an authentication scenario ran and failed. A successful direct listing also does not establish that the full runner's restricted child environment succeeded.
+
+From the repository root, collect these read-only diagnostics:
+
+```sh
+node -p 'JSON.stringify({node:process.version,execPath:process.execPath,platform:process.platform,arch:process.arch})'
+node frontend/tests/e2e/auth.browser.mjs --list-cases
+```
+
+The runner uses its own `process.execPath`, an explicit frontend working directory, and argument arrays, including paths containing spaces. It deliberately passes only an allowlist of environment variables; it does not inherit application secrets or `NODE_OPTIONS`. Do not remove that isolation to work around an unexplained failure.
+
+The runner requires Node `>=24.19.0 <25` and checks dependency directories before using them. Node 20 can sometimes list scenarios, but it is outside this repository's supported runtime. After switching to the required Node version, reinstall both packages with the `--include=dev` commands above. Missing Playwright JavaScript dependencies are distinct from missing browser binaries: binaries are not used by `--list-cases`.
+
+For a discovery failure, the runner reports exit status, signal, a spawn error code when present, and a classification such as a missing module, timeout, or malformed output. Its printed private diagnostic directory contains `discovery-auth.json`, `discovery-auth.stdout.log`, and `discovery-auth.stderr.log` (or the corresponding suite name). Inspect these locally; raw child output is not printed or uploaded because it may contain sensitive data. Report the safe summary and relevant error code rather than posting complete logs.
+
+macOS uses the same POSIX subprocess path; browser installation still needs a supported OS version (see [Playwright system requirements](https://playwright.dev/docs/intro#system-requirements)). A Linux reproduction is not proof that a user's macOS environment behaves identically.
 
 Run one suite:
 

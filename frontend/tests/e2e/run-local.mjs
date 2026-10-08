@@ -16,6 +16,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  discoverCases,
+  requireDependencies,
+  requireSupportedNode,
+} from "./discovery.mjs";
+import {
   SUITES,
   readSelectionRequest,
   selectCases,
@@ -238,31 +243,25 @@ function makeFixture(origin, password) {
 
 try {
   const request = readSelectionRequest(process.env);
+  requireSupportedNode();
+  await requireDependencies(frontend, "frontend");
+  temporary = await mkdtemp(path.join(tmpdir(), "eggdigital-e2e-"));
+  await chmod(temporary, 0o700);
   const inventory = [];
   for (const suite of SUITES) {
-    const discovery = spawnSync(
-      process.execPath,
-      [`tests/e2e/${suite}.browser.mjs`, "--list-cases"],
-      {
-        cwd: frontend,
-        env: platformEnv,
-        encoding: "utf8",
-        timeout: 20_000,
-      },
-    );
-    if (discovery.status !== 0)
-      throw new Error(`Scenario discovery failed for ${suite}`);
-    const cases = JSON.parse(discovery.stdout);
-    if (!Array.isArray(cases) || cases.some((entry) => entry.suite !== suite))
-      throw new Error(`Invalid scenario discovery for ${suite}`);
+    const cases = await discoverCases(suite, {
+      frontend,
+      env: platformEnv,
+      diagnostics: temporary,
+    });
     inventory.push(...cases);
   }
   const selected = selectCases(inventory, request);
+  await requireDependencies(backend, "backend");
   const suites = SUITES.filter((suite) =>
     selected.some((entry) => entry.suite === suite),
   ).map((suite) => `${suite}.browser.mjs`);
   for (const folder of [frontend, backend]) {
-    await access(path.join(folder, "node_modules"));
     if (
       (await readdir(folder)).some(
         (name) => name.startsWith(".env") && name !== ".env.example",
@@ -281,8 +280,6 @@ try {
     throw new Error(
       "E2E_BROWSERS must be chromium, webkit, or chromium,webkit",
     );
-  temporary = await mkdtemp(path.join(tmpdir(), "eggdigital-e2e-"));
-  await chmod(temporary, 0o700);
   evidence = path.resolve(
     process.env.E2E_EVIDENCE_DIR ?? path.join(frontend, "e2e-results", runId),
   );
