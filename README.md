@@ -135,55 +135,6 @@ curl --fail http://localhost:3001/api/v1/health/ready
 The current migration set contains 11 files. Compare their names with the history; a healthy HTTP response alone does not prove that every expected migration is present. Local fixture creation is the separate `npm run seed:login` command from Local setup. Do not delete the volume or migration history to rerun a migration.
 
 
-## Current database schema
-
-This overview describes the cumulative result of the **11 migrations in `backend/migrations`**, including retained historical tables. `pgmigrations` is maintained separately by the migration runner. The migration files are the executable source for all column definitions, indexes and constraints.
-
-| Table | Key columns and relationships | Purpose |
-|---|---|---|
-| `users` | PK `id`; unique normalized `email`; `display_name`, nullable `password_hash`, `created_at` | Existing Members. No separate roles or Google-account-link table. |
-| `meetings` | PK `id`; FK `creator_id → users.id`; unique `(creator_id, create_request_id)` | Title, description, candidate name/email, position, `starts_at`, `ends_at`, status, format, location, preparation notes, `manual_join_url`, historical provider identifiers, creation/update times. |
-| `meeting_attendees` | PK `(meeting_id, email)`; FK `meeting_id → meetings.id`; nullable FK `member_id → users.id`; `display_name` | A meeting's team; email/display name are stored on the attendee record. |
-| `deleted_meeting_requests` | PK `(creator_id, create_request_id)`; FK `creator_id → users.id`; unique `meeting_id` **without** a meeting FK | Remembers deleted create requests so retries cannot recreate the deleted meeting. |
-| `interview_notes` | PK `(meeting_id, author_key)`; FK `meeting_id → meetings.id ON DELETE CASCADE`; `content`, `updated_at` | One private note per author per meeting. `author_key` is an application identity, not a database FK to `users`. |
-| `meeting_feedback` | PK `id`; FK `meeting_id → meetings.id ON DELETE CASCADE`; unique `(meeting_id, author_key)` | `author_name`, `create_request_id`, content and timestamps; one feedback entry per author per meeting. `author_key` is not a user FK. |
-| `local_demo_seed_runs` | PK `dataset_key`; `fixture_version`, `manifest_sha256`, `applied_at` | Local fixture bookkeeping retained in schema; production startup does not seed data. |
-| `provider_connections` | PK `id`; FK `creator_id → users.id`; unique `(creator_id, provider)` | **Retained history:** provider identity, scopes, encrypted credential fields, version, expiry and connection status. No active provider-connection feature. |
-| `meeting_provider_operations` | PK `(creator_id, request_id)`; unique `operation_id`; FKs to `users` and `provider_connections`; `meeting_id` has no FK | **Retained history:** external room/calendar identifiers, join URL, operation phase and failure state. |
-| `meeting_calendar_links` | PK/FK `meeting_id → meetings.id`; FK `connection_id → provider_connections.id`; unique `(connection_id, calendar_id, event_id)` | **Retained history:** calendar/event link metadata. |
-| `meeting_provider_cleanup` | PK `meeting_id` **without** a meeting FK; unique `operation_id`; FKs to `users` and optional provider connections | **Retained history:** previous cancel/delete cleanup state and external identifiers; no active external cleanup executor. |
-
-The main relationships are **Member → created meetings → attendees / notes / feedback**. Candidate details live on `meetings`; there is no separate Candidate table. Meetings support `ONSITE` and `ONLINE`; current Online creation requires a manual HTTPS link. The database also retains compatibility with historical provider-backed Online rows. Meeting end time must be after start time. Creator/request uniqueness supports create retry handling. The final manual-link migration refuses an automatic destructive rollback; reconcile data explicitly before any downgrade.
-
-## Railway deployment preparation
-
-**Status: configuration/code prepared; no Railway deployment verified.** The actual project, environment, frontend/backend services, database, public domain and secret values still need to be confirmed. Do not treat the existence of CI or a Dockerfile as a successful deployment.
-
-Use Railway's native GitHub integration for the selected branch and enable **Wait for CI**. `.github/workflows/backend-ci.yml` runs installation, type checking, unit/API tests, isolated PostgreSQL tests, a TypeScript build and a production Docker image build. Confirm the remote checks succeed before release. Avoid adding a second CLI autodeploy route for the same service. Railway currently deprecates legacy `railway.json`/`railway.toml` configuration; the service settings below must be applied to the confirmed target (or translated to its supported IaC setup).
-
-| Setting | Backend service | Frontend service |
-|---|---|---|
-| Repository root | `/backend` | `/frontend` |
-| Builder | `Dockerfile`, final `runtime` stage | `Dockerfile`, final `runtime` stage |
-| Start | `node dist/server.js` | `npm run start` |
-| Port | Railway-provided `PORT`; binds `0.0.0.0` | Railway-provided `PORT`; binds `0.0.0.0` |
-| Pre-deploy command | `node scripts/migrate-production.mjs` | None |
-| Readiness path | `/api/v1/health/ready` (database readiness) | `/login` (HTTP readiness only) |
-
-The production migration command applies only the existing ordered migrations, with locking and a transaction. It uses `DATABASE_URL` from the service environment and does not run automatically on normal application startup. It does not seed users or reset data. The separate local migration command retains its local-database restriction. Validate the production image and migration command against an isolated database before using a production target; those new packaging checks have not yet been completed locally.
-
-Configure these variables in Railway's private service settings, never in committed files:
-
-- **Backend:** `DATABASE_URL` for the confirmed PostgreSQL service; `JWT_SIGNING_KEY_BASE64` encoding at least 32 random bytes; `AUTH_SERVICE_KEY` shared only with the Next server; `GOOGLE_CLIENT_ID` matching the frontend Google client; `ALLOWED_ORIGIN` equal to the frontend's exact HTTPS origin; `COOKIE_SECURE=true`. Retain the existing fixed `JWT_ISSUER=urn:meeting-manager:local` and `JWT_AUDIENCE=urn:meeting-manager:api` contract; the default access lifetime is 900 seconds.
-- **Frontend build and runtime:** `NEXT_PUBLIC_API_BASE_URL=/api/v1` and `API_PROXY_ORIGIN` equal to the backend's private HTTP(S) origin, including its actual service port. Supply both as Docker build arguments as well as runtime variables; the Next rewrite destination is embedded during build. The origin must have no credentials, path, query or fragment. Rebuild if it changes.
-- **Frontend server only:** `AUTH_BACKEND_INTERNAL_URL` equal to the private backend origin; matching `AUTH_SERVICE_KEY`; independent `NEXTAUTH_SECRET`; `COOKIE_SECURE=true`; `NEXTAUTH_URL` equal to the public frontend HTTPS origin; `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` when enabling Google login. Register the exact frontend HTTPS URL plus `/api/auth/callback/google` with Google. Never expose private keys or secrets through `NEXT_PUBLIC_*`.
-
-Browser traffic uses **frontend public origin → `/api/v1` proxy → private backend**; `/api/auth` remains on NextAuth. This preserves the host-only HttpOnly authentication cookie. Calling a separately hosted public backend directly would not receive that frontend cookie. Do not widen the cookie domain to compensate. Use one frontend replica because authentication-attempt state is held in process memory, and one backend replica because pagination signing state is held in process memory. Reload lists after a backend restart. The backend binds IPv4 `0.0.0.0`; select a Railway environment with IPv4-capable private networking and verify frontend-to-backend connectivity before release. Do not assume compatibility with an IPv6-only private network.
-
-Before declaring deployment complete, verify the selected commit and successful CI, applied migrations, database readiness, frontend login, authenticated same-origin meeting requests, logout and the actual registered Google callback. An empty production database also needs deliberately provisioned legitimate Members; local synthetic seed commands are not a production onboarding process. Target selection, secrets, Member provisioning and actual Railway/browser checks remain pending.
-
-Official deployment references: [GitHub autodeploy and Wait for CI](https://docs.railway.com/deployments/github-autodeploys), [pre-deploy commands](https://docs.railway.com/deployments/pre-deploy-command), and [configuration status](https://docs.railway.com/config-as-code/reference).
-
 ## Interactive wireframe
 
 ดู [ภาพรวม flow และวิธีติดตั้ง/เปิดต้นแบบ](doc/README.md): Login → Member/Guest → รายการนัด → Add/Edit/ทีม/Cancel/Delete → Summary พร้อม Notes ส่วนตัวและ Feedback
