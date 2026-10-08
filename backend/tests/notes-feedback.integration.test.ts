@@ -413,6 +413,16 @@ describe('Feedback one per author, own edits and controlled older reads', () => 
     expect(latest.body.items.map((f) => f.id)).toEqual(ids.slice(5));
     expect(latest.body.ownFeedbackId).toBe(ids[0]);
     expect(latest.body.items.some((f) => f.isOwn)).toBe(false);
+    const smallFirst = await get(path + '?page=1&pageSize=20');
+    expect(smallFirst.status).toBe(200);
+    expect(smallFirst.body).toMatchObject({ page: 1, pageSize: 20, total: 55, totalPages: 3 });
+    expect(smallFirst.body.items).toHaveLength(20);
+    const smallLast = await get(
+      path + '?page=3&pageSize=20&snapshot=' + encodeURIComponent(smallFirst.body.snapshot),
+    );
+    expect(smallLast.status).toBe(200);
+    expect(smallLast.body.items).toHaveLength(15);
+    expect(smallLast.body.totalPages).toBe(3);
     const cursor = latest.body.snapshot;
     expect(typeof cursor).toBe('string');
     await expect(
@@ -452,10 +462,17 @@ describe('Feedback one per author, own edits and controlled older reads', () => 
     expect(older.body.items.map((f) => f.id)).toEqual(ids.slice(0, 5));
     expect(older.body.page).toBe(2);
     expect(older.body.total).toBe(55);
+    expect(older.body.totalPages).toBe(2);
     expect(older.body.asOf).toBe(latest.body.asOf);
     const beyond = await get(path + '?page=3&snapshot=' + encodeURIComponent(cursor));
     expect(beyond.status).toBe(200);
-    expect(beyond.body).toMatchObject({ items: [], page: 3, pageSize: 50, total: 55 });
+    expect(beyond.body).toMatchObject({
+      items: [],
+      page: 3,
+      pageSize: 50,
+      total: 55,
+      totalPages: 2,
+    });
 
     expect(older.body.items[0].text).toBe('Revised own old feedback');
     expect(older.body.ownFeedbackId).toBe(ids[0]);

@@ -9,6 +9,7 @@ export type CurrentMeetingGroup = {
   page: number;
   pageSize: number;
   total: number;
+  totalPages: number;
 };
 export type MeetingList = {
   date: string;
@@ -59,7 +60,8 @@ function parseCurrentMeetingPage(
     value.page !== page ||
     value.pageSize !== 10 ||
     !Number.isSafeInteger(value.total) ||
-    (value.total as number) < 0
+    (value.total as number) < 0 ||
+    value.totalPages !== Math.ceil((value.total as number) / 10)
   ) {
     throw new MeetingError("INVALID_RESPONSE", status);
   }
@@ -68,7 +70,13 @@ function parseCurrentMeetingPage(
     10,
     status,
   );
-  return { items: result.items, page, pageSize: 10, total: result.count };
+  return {
+    items: result.items,
+    page,
+    pageSize: 10,
+    total: result.count,
+    totalPages: value.totalPages as number,
+  };
 }
 async function fetchValidatedMeetingListResponse(
   date: string,

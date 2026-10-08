@@ -77,7 +77,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
       const api = {
         search: vi
           .fn()
-          .mockResolvedValue({ items: [one], page: 1, pageSize: 20, total: 1 }),
+          .mockResolvedValue({
+            items: [one],
+            page: 1,
+            pageSize: 20,
+            total: 1,
+            totalPages: 1,
+          }),
       };
       const { result } = renderHook(() => useMemberPicker(false, api));
       await act(async () => result.current.setQuery("one"));
@@ -107,7 +113,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
       const api = {
         search: vi
           .fn()
-          .mockResolvedValue({ items: [one], page: 1, pageSize: 20, total: 1 }),
+          .mockResolvedValue({
+            items: [one],
+            page: 1,
+            pageSize: 20,
+            total: 1,
+            totalPages: 1,
+          }),
       };
       const { result } = renderHook(() => useMemberPicker(false, api));
       await act(async () => result.current.setQuery("one"));
@@ -138,24 +150,35 @@ describe("M1 picker state — mocked M1 and current identity", () => {
     act(() => result.current.setQuery("old"));
     act(() => result.current.setQuery("new"));
     await act(async () =>
-      latest.resolve({ items: [two], page: 1, pageSize: 20, total: 1 }),
+      latest.resolve({
+        items: [two],
+        page: 1,
+        pageSize: 20,
+        total: 1,
+        totalPages: 1,
+      }),
     );
     await act(async () =>
-      old.resolve({ items: [one], page: 1, pageSize: 20, total: 30 }),
+      old.resolve({
+        items: [one],
+        page: 1,
+        pageSize: 20,
+        total: 30,
+        totalPages: 2,
+      }),
     );
     expect(result.current.items).toEqual([two]);
     expect(result.current.hasMore).toBe(false);
   });
   it("excludes creator/duplicates/selected, preserves selection on clear and supports removal", async () => {
     const api = {
-      search: vi
-        .fn()
-        .mockResolvedValue({
-          items: [owner, one, one, two],
-          page: 1,
-          pageSize: 20,
-          total: 4,
-        }),
+      search: vi.fn().mockResolvedValue({
+        items: [owner, one, one, two],
+        page: 1,
+        pageSize: 20,
+        total: 4,
+        totalPages: 1,
+      }),
     };
     const { result } = renderHook(() => useMemberPicker(false, api));
     await act(async () => result.current.setQuery("member"));
@@ -182,6 +205,7 @@ describe("M1 picker state — mocked M1 and current identity", () => {
           page: 1,
           pageSize: 20,
           total: 1,
+          totalPages: 1,
         })
         .mockRejectedValueOnce(new MemberLookupError("NETWORK_ERROR"))
         .mockResolvedValueOnce({
@@ -189,6 +213,7 @@ describe("M1 picker state — mocked M1 and current identity", () => {
           page: 1,
           pageSize: 20,
           total: 1,
+          totalPages: 1,
         }),
     };
     const { result } = renderHook(() => useMemberPicker(false, api));
@@ -210,6 +235,7 @@ describe("M1 picker state — mocked M1 and current identity", () => {
           page: 1,
           pageSize: 20,
           total: 30,
+          totalPages: 2,
         })
         .mockRejectedValueOnce(new Error("offline"))
         .mockResolvedValueOnce({
@@ -217,6 +243,7 @@ describe("M1 picker state — mocked M1 and current identity", () => {
           page: 2,
           pageSize: 20,
           total: 22,
+          totalPages: 2,
         }),
     };
     const { result } = renderHook(() => useMemberPicker(false, api));
@@ -238,7 +265,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
     act(() => result.current.setQuery("one"));
     act(() => result.current.setQuery(""));
     await act(async () =>
-      pending.resolve({ items: [one], page: 1, pageSize: 20, total: 1 }),
+      pending.resolve({
+        items: [one],
+        page: 1,
+        pageSize: 20,
+        total: 1,
+        totalPages: 1,
+      }),
     );
     expect(result.current.items).toEqual([]);
     act(() => result.current.setQuery("two"));
@@ -256,6 +289,7 @@ describe("M1 picker state — mocked M1 and current identity", () => {
           page: 1,
           pageSize: 20,
           total: 1,
+          totalPages: 1,
         })
         .mockReturnValueOnce(pending.promise),
     };
@@ -276,7 +310,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
     expect(result.current.disabled).toBe(true);
     act(() => emit(identity("new-owner")));
     await act(async () =>
-      pending.resolve({ items: [two], page: 1, pageSize: 20, total: 1 }),
+      pending.resolve({
+        items: [two],
+        page: 1,
+        pageSize: 20,
+        total: 1,
+        totalPages: 1,
+      }),
     );
     expect(result.current.selected).toEqual([]);
     expect(result.current.items).toEqual([]);
@@ -286,7 +326,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
     const api = {
       search: vi
         .fn()
-        .mockResolvedValue({ items: [one], page: 1, pageSize: 20, total: 1 }),
+        .mockResolvedValue({
+          items: [one],
+          page: 1,
+          pageSize: 20,
+          total: 1,
+          totalPages: 1,
+        }),
     };
     const { result } = renderHook(() => useMemberPicker(false, api));
     await act(async () => result.current.setQuery("one"));
@@ -314,7 +360,13 @@ describe("M1 picker state — mocked M1 and current identity", () => {
     const api = {
       search: vi
         .fn()
-        .mockResolvedValue({ items: [one], page: 1, pageSize: 20, total: 1 }),
+        .mockResolvedValue({
+          items: [one],
+          page: 1,
+          pageSize: 20,
+          total: 1,
+          totalPages: 1,
+        }),
     };
     const { result, rerender } = renderHook(
       ({ locked }) => useMemberPicker(locked, api),
@@ -334,7 +386,11 @@ describe("M1 picker state — mocked M1 and current identity", () => {
         ...identity(),
         session: {
           ...identity().session!,
-          user: { ...owner, id: null, membership: "guest" as unknown as "member" },
+          user: {
+            ...owner,
+            id: null,
+            membership: "guest" as unknown as "member",
+          },
         },
       }),
     );
@@ -356,7 +412,9 @@ describe("page-local TeamPicker — TEST-MM-043/044 keyboard and status", () => 
     const input = screen.getByRole("combobox");
     fireEvent.focus(input);
     expect(api.search).not.toHaveBeenCalled();
-    expect(screen.getByText("0 selected · excluding the organizer")).toBeVisible();
+    expect(
+      screen.getByText("0 selected · excluding the organizer"),
+    ).toBeVisible();
     fireEvent.change(input, { target: { value: "member" } });
     expect(input).toHaveAttribute("aria-busy", "true");
     await act(async () =>
@@ -365,6 +423,7 @@ describe("page-local TeamPicker — TEST-MM-043/044 keyboard and status", () => 
         page: 1,
         pageSize: 20,
         total: 3,
+        totalPages: 1,
       }),
     );
     fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -372,20 +431,30 @@ describe("page-local TeamPicker — TEST-MM-043/044 keyboard and status", () => 
       document.getElementById(input.getAttribute("aria-activedescendant")!),
     ).toHaveTextContent("Member One");
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByText("1 selected · excluding the organizer")).toBeVisible();
+    expect(
+      screen.getByText("1 selected · excluding the organizer"),
+    ).toBeVisible();
     expect(input).toHaveValue("");
     expect(input).toHaveFocus();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(input).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: "Remove Member One" }));
-    expect(screen.getByText("0 selected · excluding the organizer")).toBeVisible();
+    expect(
+      screen.getByText("0 selected · excluding the organizer"),
+    ).toBeVisible();
   });
   it("shows lookup failure separately from no results and retries accessibly", async () => {
     const api = {
       search: vi
         .fn()
         .mockRejectedValueOnce(new Error("offline"))
-        .mockResolvedValueOnce({ items: [], page: 1, pageSize: 20, total: 0 }),
+        .mockResolvedValueOnce({
+          items: [],
+          page: 1,
+          pageSize: 20,
+          total: 0,
+          totalPages: 0,
+        }),
     };
     function Harness() {
       return <TeamPicker picker={useMemberPicker(false, api)} />;

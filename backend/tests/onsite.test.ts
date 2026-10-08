@@ -67,6 +67,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     expect(m.readPage).not.toHaveBeenCalled();
   });
@@ -85,6 +86,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 2,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
     });
     expect(m.readPage).toHaveBeenCalledWith('sample', 20, 20);
   });
@@ -421,8 +423,13 @@ describe('S1 TEST-MM-022/027/041 HTTP identity and envelope', () => {
     expect(h.memberModel.readPage).not.toHaveBeenCalled();
     const response = await get('page=2&pageSize=20');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0 });
+    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0, totalPages: 0 });
     expect(h.memberModel.readPage).toHaveBeenCalledWith('sample', 20, 20);
+    h.memberModel.readPage.mockResolvedValue({ items: [], total: 25 });
+    const smaller = await get('page=2&pageSize=5');
+    expect(smaller.status).toBe(200);
+    expect(smaller.body).toEqual({ items: [], page: 2, pageSize: 5, total: 25, totalPages: 5 });
+    expect(h.memberModel.readPage).toHaveBeenLastCalledWith('sample', 5, 5);
   });
   it('all routes check current Candidate before business service, including replay', async () => {
     const h = await harness(),
@@ -547,5 +554,24 @@ describe('Confirmed Add temporal and separate-field amendments', () => {
     await expect(
       meetingHarness().service.saveMeeting(user, { ...draft(), preparationNotes }),
     ).rejects.toMatchObject({ status: 400, fields: { preparationNotes: expect.any(String) } });
+  });
+});
+
+describe('member page count metadata', () => {
+  it.each([0, 1, 25])('derives totalPages from the same SQL count for total %s', async (total) => {
+    const model = { readPage: vi.fn().mockResolvedValue({ items: [], total }) };
+    const service = new MemberService(model);
+    for (const size of [1, 5, 20]) {
+      for (const page of [1, 99]) {
+        expect(await service.searchMembers(' member ', page, size)).toEqual({
+          items: [],
+          total,
+          page,
+          pageSize: size,
+          totalPages: Math.ceil(total / size),
+        });
+        expect(model.readPage).toHaveBeenLastCalledWith('member', size, (page - 1) * size);
+      }
+    }
   });
 });

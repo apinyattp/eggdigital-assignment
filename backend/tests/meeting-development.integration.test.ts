@@ -546,6 +546,24 @@ describe('Authorized summary and three section retrieval', () => {
     expect(r.body.groups.rejectedCancelled.items).toHaveLength(5);
     expect(r.body.groups.past.count).toBe(9);
     expect(r.body.groups.past.items).toHaveLength(5);
+    const smallFirst = await get('?date=' + date + '&pageSize=3');
+    expect(smallFirst.status).toBe(200);
+    expect(smallFirst.body.groups.upcomingCurrent).toMatchObject({
+      page: 1,
+      pageSize: 3,
+      total: 17,
+      totalPages: 6,
+    });
+    expect(smallFirst.body.groups.upcomingCurrent.items).toHaveLength(3);
+    const smallLast = await get(
+      '?date=' +
+        date +
+        '&section=upcomingCurrent&page=6&pageSize=3&snapshot=' +
+        encodeURIComponent(smallFirst.body.snapshot),
+    );
+    expect(smallLast.status).toBe(200);
+    expect(smallLast.body.group.items).toHaveLength(2);
+    expect(smallLast.body.group.totalPages).toBe(6);
     const cursor = r.body.snapshot;
     const next = await get(
       '?date=' + date + '&section=upcomingCurrent&page=2&snapshot=' + encodeURIComponent(cursor),
@@ -558,7 +576,13 @@ describe('Authorized summary and three section retrieval', () => {
       '?date=' + date + '&section=upcomingCurrent&page=3&snapshot=' + encodeURIComponent(cursor),
     );
     expect(beyond.status).toBe(200);
-    expect(beyond.body.group).toMatchObject({ items: [], page: 3, pageSize: 10, total: 17 });
+    expect(beyond.body.group).toMatchObject({
+      items: [],
+      page: 3,
+      pageSize: 10,
+      total: 17,
+      totalPages: 2,
+    });
     expect(beyond.body.referenceTime).toBe(r.body.referenceTime);
     const firstAgain = await get(
       '?date=' + date + '&section=upcomingCurrent&page=1&snapshot=' + encodeURIComponent(cursor),

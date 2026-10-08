@@ -93,6 +93,7 @@ describe("N1/N2 private Notes state — REQ020 AC024/032, mocked API/auth", () =
         page: 1,
         pageSize: 50,
         total: 0,
+        totalPages: 0,
         asOf: "2026-10-08T06:00:00Z",
         snapshot: "snapshot",
       }),

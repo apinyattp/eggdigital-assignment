@@ -6,6 +6,7 @@ export type MemberPage = {
   page: number;
   pageSize: number;
   total: number;
+  totalPages: number;
 };
 
 export class MemberLookupError extends Error {
@@ -31,7 +32,8 @@ export const membersApi = {
     )
       throw new MemberLookupError("VALIDATION_ERROR");
     const trimmed = query.trim();
-    if (!trimmed) return { items: [], page, pageSize: 20, total: 0 };
+    if (!trimmed)
+      return { items: [], page, pageSize: 20, total: 0, totalPages: 0 };
     const params = new URLSearchParams({
       query: trimmed,
       page: String(page),
@@ -80,6 +82,8 @@ export const membersApi = {
       typeof value.total !== "number" ||
       !Number.isSafeInteger(value.total) ||
       value.total < 0 ||
+      !("totalPages" in value) ||
+      value.totalPages !== Math.ceil(value.total / 20) ||
       value.items.length > 20
     ) {
       throw new MemberLookupError("INVALID_RESPONSE");
@@ -99,6 +103,12 @@ export const membersApi = {
       }
       return { id: item.id, displayName: item.displayName, email: item.email };
     });
-    return { items, page, pageSize: 20, total: value.total };
+    return {
+      items,
+      page,
+      pageSize: 20,
+      total: value.total,
+      totalPages: value.totalPages as number,
+    };
   },
 };

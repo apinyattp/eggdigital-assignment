@@ -17,6 +17,7 @@ export type FeedbackPage = {
   page: number;
   pageSize: number;
   total: number;
+  totalPages: number;
   asOf: string;
   snapshot: string;
 };
@@ -152,6 +153,7 @@ export const interviewContentApi = {
       items,
       ownFeedbackId,
       total,
+      totalPages,
       asOf,
       snapshot: returnedSnapshot,
     } = result.value;
@@ -162,6 +164,7 @@ export const interviewContentApi = {
       result.value.pageSize !== 50 ||
       !Number.isSafeInteger(total) ||
       (total as number) < 0 ||
+      totalPages !== Math.ceil((total as number) / 50) ||
       items.length > 50 ||
       typeof asOf !== "string" ||
       !Number.isFinite(Date.parse(asOf)) ||
@@ -176,6 +179,7 @@ export const interviewContentApi = {
       page,
       pageSize: 50,
       total: total as number,
+      totalPages: totalPages as number,
       asOf,
       snapshot: returnedSnapshot,
     };

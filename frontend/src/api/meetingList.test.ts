@@ -23,7 +23,13 @@ const response = () => ({
   referenceTime: "2026-10-08T02:00:00.000001Z",
   snapshot: "opaque/+?",
   groups: {
-    upcomingCurrent: { total: 17, page: 1, pageSize: 10, items: [meeting] },
+    upcomingCurrent: {
+      total: 17,
+      page: 1,
+      pageSize: 10,
+      totalPages: 2,
+      items: [meeting],
+    },
     rejectedCancelled: {
       count: 12,
       items: [
@@ -46,6 +52,22 @@ const mock = (value: unknown, status = 200) => {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe("R1 selected-day list transport", () => {
+  it.each([undefined, -1, 0, 1.5, "2"])(
+    "rejects inconsistent totalPages %j",
+    async (totalPages) => {
+      const value = response();
+      mock({
+        ...value,
+        groups: {
+          ...value.groups,
+          upcomingCurrent: { ...value.groups.upcomingCurrent, totalPages },
+        },
+      });
+      await expect(meetingListApi.read(date)).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
   it("uses selected day with fixed page size and without identity and preserves counts, statuses, precision and both fields", async () => {
     const value = response(),
       fetch = mock(value);
@@ -66,7 +88,13 @@ describe("R1 selected-day list transport", () => {
         referenceTime: response().referenceTime,
         snapshot: "opaque/+?",
         section: "upcomingCurrent",
-        group: { total: 17, page: 2, pageSize: 10, items: [meeting] },
+        group: {
+          total: 17,
+          page: 2,
+          pageSize: 10,
+          totalPages: 2,
+          items: [meeting],
+        },
       },
       fetch = mock(value);
     expect(await meetingListApi.more(date, 2, "opaque/+?")).toEqual(value);

@@ -20,6 +20,24 @@ function respond(value: unknown, status = 200) {
   return fetch;
 }
 describe("N1/N2/F1/F2/F3 transport — SA bcb893dd; mocked HTTP", () => {
+  it.each([undefined, -1, 0, 1.5, "2"])(
+    "rejects inconsistent feedback totalPages %j",
+    async (totalPages) => {
+      respond({
+        items: [],
+        ownFeedbackId: null,
+        page: 1,
+        pageSize: 50,
+        total: 51,
+        totalPages,
+        asOf: version,
+        snapshot: "snapshot",
+      });
+      await expect(api.readFeedback("meeting")).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
   it("reads only notes/me, distinguishing absent from stored empty text", async () => {
     let fetch = respond({ note: null });
     expect(await api.readNote("meeting")).toBeNull();
@@ -67,6 +85,7 @@ describe("N1/N2/F1/F2/F3 transport — SA bcb893dd; mocked HTTP", () => {
       page: 2,
       pageSize: 50,
       total: 51,
+      totalPages: 2,
       asOf: "2026-10-08T06:00:00Z",
       snapshot: "opaque+/=?",
     });
@@ -76,6 +95,7 @@ describe("N1/N2/F1/F2/F3 transport — SA bcb893dd; mocked HTTP", () => {
       page: 2,
       pageSize: 50,
       total: 51,
+      totalPages: 2,
       asOf: "2026-10-08T06:00:00Z",
       snapshot: "opaque+/=?",
     });
@@ -126,7 +146,7 @@ describe("N1/N2/F1/F2/F3 transport — SA bcb893dd; mocked HTTP", () => {
     },
   );
   it("rejects incomplete list metadata rather than inferring permission to add", async () => {
-    respond({ items: [], page: 1, pageSize: 50, total: 0 });
+    respond({ items: [], page: 1, pageSize: 50, total: 0, totalPages: 0 });
     await expect(api.readFeedback("meeting")).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
       status: 200,

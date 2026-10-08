@@ -11,6 +11,7 @@ describe("M1 member transport — TEST-MM-013/044", () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -29,6 +30,7 @@ describe("M1 member transport — TEST-MM-013/044", () => {
           page: 2,
           pageSize: 20,
           total: 25,
+          totalPages: 2,
         }),
       ),
     );
@@ -50,8 +52,33 @@ describe("M1 member transport — TEST-MM-013/044", () => {
       page: 2,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
     });
   });
+  it.each([undefined, -1, 0, 1.5, "2"])(
+    "rejects inconsistent totalPages %j",
+    async (totalPages) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              JSON.stringify({
+                items: [],
+                page: 1,
+                pageSize: 20,
+                total: 21,
+                totalPages,
+              }),
+            ),
+          ),
+      );
+      await expect(membersApi.search("member")).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
   it.each([401, 403, 503])(
     "preserves HTTP %s without turning failure into empty results",
     async (status) => {
@@ -70,11 +97,11 @@ describe("M1 member transport — TEST-MM-013/044", () => {
     },
   );
   it.each([
-    { items: [], page: 0, pageSize: 20, total: 0 },
-    { items: [{ id: "x" }], page: 1, pageSize: 20, total: 0 },
-    { items: [], page: 1, pageSize: 10, total: 0 },
+    { items: [], page: 0, pageSize: 20, total: 0, totalPages: 0 },
+    { items: [{ id: "x" }], page: 1, pageSize: 20, total: 0, totalPages: 0 },
+    { items: [], page: 1, pageSize: 10, total: 0, totalPages: 0 },
     { items: [], page: 1, pageSize: 20, total: -1 },
-    { items: [], page: 1, pageSize: 20, total: 0.5 },
+    { items: [], page: 1, pageSize: 20, total: 0.5, totalPages: 1 },
     null,
   ])("rejects malformed successful responses %j", async (value) => {
     vi.stubGlobal(
