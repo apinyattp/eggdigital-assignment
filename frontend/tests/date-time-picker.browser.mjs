@@ -202,7 +202,7 @@ for (const engine of engines) {
               "Oct",
               "Nov",
               "Dec",
-            ].indexOf(monthName) + 1;
+            ].indexOf(monthName === "Sept" ? "Sep" : monthName) + 1;
           assert.ok(monthNumber > 0);
           const chosen = `${displayedYear}-${String(monthNumber).padStart(2, "0")}-0${cycle + 5}`;
           const choice = dialog.locator(`button[data-date="${chosen}"]`);
