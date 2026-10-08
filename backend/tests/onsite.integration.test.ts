@@ -142,6 +142,7 @@ describe('S1 real PostgreSQL M1/M2/M3 and current identity', () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     for (const name of ['literal%value', 'literal_value', 'literal\\value', 'literalXvalue'])
       await pool.query('INSERT INTO users(id,email,display_name) VALUES($1,$2,$3)', [
@@ -177,6 +178,19 @@ describe('S1 real PostgreSQL M1/M2/M3 and current identity', () => {
       page: 3,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
+    });
+    const smallFirst = await service.searchMembers('paging', 1, 3);
+    const smallLast = await service.searchMembers('paging', 9, 3);
+    expect(smallFirst).toMatchObject({ page: 1, pageSize: 3, total: 25, totalPages: 9 });
+    expect(smallFirst.items).toHaveLength(3);
+    expect(smallLast.items).toHaveLength(1);
+    expect(await service.searchMembers('paging', 10, 3)).toMatchObject({
+      items: [],
+      page: 10,
+      pageSize: 3,
+      total: 25,
+      totalPages: 9,
     });
     expect((await service.searchMembers('other', 1, 20)).total).toBe(0);
   });

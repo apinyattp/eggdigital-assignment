@@ -67,6 +67,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     expect(m.readPage).not.toHaveBeenCalled();
   });
@@ -85,6 +86,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 2,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
     });
     expect(m.readPage).toHaveBeenCalledWith('sample', 20, 20);
   });
@@ -334,6 +336,102 @@ describe('S1-DV-01 / TEST-MM-016 representable fractional instant ordering', () 
     expect(query.mock.calls[0][0]).toContain("AT TIME ZONE 'UTC'");
   });
 });
+describe('batched attendee writes (mocked pg client, not real DB)', () => {
+  const members = Array.from({ length: 30 }, (_, index) => ({
+    id: `10000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`,
+    email: `member${index}@example.test`,
+    display_name: `Member ${index}`,
+  }));
+  function database(current = [] as { email: string; member_id: string }[], replay = false) {
+    let created = false;
+    const client = {
+      query: vi.fn(async (sql: string, _values?: unknown[]) => {
+        if (sql.startsWith('SELECT id,email,display_name')) return { rows: members };
+        if (sql.startsWith('SELECT create_request_id'))
+          return { rows: [{ create_request_id: draft().requestId }] };
+        if (sql.startsWith('SELECT id, updated_at'))
+          return { rows: [{ id: stored.id, matches: true, creator_email: user.email }] };
+        if (sql.startsWith('SELECT email,member_id')) return { rows: current };
+        if (sql.startsWith('INSERT INTO meetings')) {
+          created = true;
+          return { rows: [{ id: stored.id }] };
+        }
+        if (sql.startsWith('SELECT m.id'))
+          return {
+            rows:
+              created || replay || sql.includes('WHERE m.creator_id=$1 AND m.id=$2')
+                ? [stored]
+                : [],
+          };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+    return { client, pool, model: new MeetingModel(pool as never) };
+  }
+  it.each(['create', 'mutate'] as const)(
+    'inserts a large team with one statement on the transaction client during %s',
+    async (operation) => {
+      const { client, pool, model } = database();
+      const attendeeMemberIds = members.map((member) => member.id);
+      if (operation === 'create') {
+        await model.create(memberId, {
+          ...draft(),
+          attendeeMemberIds,
+          description: null,
+          preparationNotes: null,
+          location: null,
+          status: 'PENDING',
+          format: 'ONSITE',
+        });
+      } else {
+        await model.mutate(memberId, stored.id, {
+          expectedUpdatedAt: stored.updatedAt,
+          attendeeChanges: { addMemberIds: attendeeMemberIds, removeEmails: [] },
+        });
+      }
+      const inserts = client.query.mock.calls.filter(([sql]) =>
+        sql.startsWith('INSERT INTO meeting_attendees'),
+      );
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0][1]).toEqual([
+        stored.id,
+        members.map((member) => member.email),
+        members.map((member) => member.display_name),
+        attendeeMemberIds,
+      ]);
+      expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+      expect(client.release).toHaveBeenCalledWith(false);
+      expect(pool.query).not.toHaveBeenCalled();
+    },
+  );
+  it('does not insert or update the version when every added member is already retained', async () => {
+    const { model, client } = database(
+      members.map((member) => ({ email: member.email, member_id: member.id })),
+    );
+    await model.mutate(memberId, stored.id, {
+      expectedUpdatedAt: stored.updatedAt,
+      attendeeChanges: { addMemberIds: members.map((member) => member.id), removeEmails: [] },
+    });
+    expect(client.query.mock.calls.some(([sql]) => /^(INSERT|UPDATE|DELETE)/.test(sql))).toBe(
+      false,
+    );
+  });
+  it('does not write attendees on a create replay', async () => {
+    const { model, client } = database([], true);
+    const result = await model.create(memberId, {
+      ...draft(),
+      description: null,
+      preparationNotes: null,
+      location: null,
+      status: 'PENDING',
+      format: 'ONSITE',
+    });
+    expect(result.created).toBe(false);
+    expect(client.query.mock.calls.some(([sql]) => sql.startsWith('INSERT'))).toBe(false);
+  });
+});
 describe('S1 TEST-MM-020 model fault handling (mocked pg client, not real DB)', () => {
   it.each(['members', 'attendees', 'readback', 'commit'])(
     'fault at %s releases same client and maps safely',
@@ -421,8 +519,13 @@ describe('S1 TEST-MM-022/027/041 HTTP identity and envelope', () => {
     expect(h.memberModel.readPage).not.toHaveBeenCalled();
     const response = await get('page=2&pageSize=20');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0 });
+    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0, totalPages: 0 });
     expect(h.memberModel.readPage).toHaveBeenCalledWith('sample', 20, 20);
+    h.memberModel.readPage.mockResolvedValue({ items: [], total: 25 });
+    const smaller = await get('page=2&pageSize=5');
+    expect(smaller.status).toBe(200);
+    expect(smaller.body).toEqual({ items: [], page: 2, pageSize: 5, total: 25, totalPages: 5 });
+    expect(h.memberModel.readPage).toHaveBeenLastCalledWith('sample', 5, 5);
   });
   it('all routes check current Candidate before business service, including replay', async () => {
     const h = await harness(),
@@ -607,5 +710,24 @@ describe('meeting edit pre-read scope', () => {
       ).rejects.toBe(error);
     }
     expect(model.findById).not.toHaveBeenCalled();
+  });
+});
+
+describe('member page count metadata', () => {
+  it.each([0, 1, 25])('derives totalPages from the same SQL count for total %s', async (total) => {
+    const model = { readPage: vi.fn().mockResolvedValue({ items: [], total }) };
+    const service = new MemberService(model);
+    for (const size of [1, 5, 20]) {
+      for (const page of [1, 99]) {
+        expect(await service.searchMembers(' member ', page, size)).toEqual({
+          items: [],
+          total,
+          page,
+          pageSize: size,
+          totalPages: Math.ceil(total / size),
+        });
+        expect(model.readPage).toHaveBeenLastCalledWith('member', size, (page - 1) * size);
+      }
+    }
   });
 });

@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceLoading } from "@/app/(main)/_components/WorkspaceLoading";
 
 import Link from "next/link";
 import { useCallback, useRef } from "react";
@@ -55,7 +56,7 @@ export function AuthLanding({
   return (
     <main className={styles.shell}>
       {(!auth.checked || auth.status === "checking") && (
-        <p role="status">Checking your account…</p>
+        <WorkspaceLoading message="Checking your account…" />
       )}
       {auth.checked &&
         auth.status === "authenticated" &&

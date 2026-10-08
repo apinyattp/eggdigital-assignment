@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceLoading } from "@/app/(main)/_components/WorkspaceLoading";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SaveToast } from "@/components/ui/SaveToast";
@@ -6,16 +7,16 @@ import { useRouter } from "next/navigation";
 import { authController } from "@/hooks/authController";
 import {
   bangkokToday,
-  useOnsiteForm,
-  type OnsiteFormValues,
-} from "@/hooks/useOnsiteForm";
+  useMeetingCreateForm,
+  type MeetingCreateFormValues,
+} from "@/hooks/useMeetingCreateForm";
 import { TeamPicker } from "./TeamPicker";
 import { DatePicker } from "./DatePicker";
 import { TimeRangePicker } from "./TimeRangePicker";
 import styles from "../onsite-form.module.css";
 
-export function OnsiteForm() {
-  const form = useOnsiteForm(),
+export function MeetingCreateForm() {
+  const form = useMeetingCreateForm(),
     { auth, save, values, errors } = form;
   const session = auth.usableSession;
   const formElement = useRef<HTMLFormElement>(null);
@@ -57,7 +58,7 @@ export function OnsiteForm() {
   if (!auth.checked || auth.status === "checking")
     return (
       <main className={styles.shell}>
-        <p role="status">Checking your account…</p>
+        <WorkspaceLoading message="Checking your account…" />
       </main>
     );
   if (session?.user.membership !== "member")
@@ -81,7 +82,7 @@ export function OnsiteForm() {
       </main>
     );
   const field = (
-    key: keyof OnsiteFormValues,
+    key: keyof MeetingCreateFormValues,
     label: string,
     required = false,
     multiline = false,
@@ -303,7 +304,7 @@ export function OnsiteForm() {
                     onChange={(event) =>
                       form.change(
                         "status",
-                        event.target.value as OnsiteFormValues["status"],
+                        event.target.value as MeetingCreateFormValues["status"],
                       )
                     }
                   >

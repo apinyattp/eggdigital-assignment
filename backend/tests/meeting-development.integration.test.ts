@@ -159,6 +159,134 @@ describe('Confirmed Add amendment in real PostgreSQL', () => {
   });
 });
 
+describe('Batched attendee persistence in real PostgreSQL', () => {
+  const addedMembers = [
+    {
+      id: '10000000-0000-4000-8000-000000000010',
+      email: 'zeta@example.test',
+      displayName: 'สมาชิก, "Zeta"',
+    },
+    {
+      id: '10000000-0000-4000-8000-000000000011',
+      email: 'alpha@example.test',
+      displayName: 'Alpha\nSnapshot',
+    },
+  ];
+  async function seedAddedMembers() {
+    for (const member of addedMembers) {
+      await pool.query('INSERT INTO users(id,email,display_name) VALUES($1,$2,$3)', [
+        member.id,
+        member.email,
+        member.displayName,
+      ]);
+    }
+  }
+  it.each(['create', 'edit'] as const)(
+    '%s preserves member snapshots, response order, and idempotent retries for multiple additions',
+    async (operation) => {
+      await seedAddedMembers();
+      const existing = operation === 'edit' ? await create() : null;
+      const selected = [addedMembers[1].id, attendee, addedMembers[0].id];
+      const body =
+        operation === 'create'
+          ? { ...draft(), attendeeMemberIds: selected }
+          : {
+              expectedUpdatedAt: existing.updatedAt,
+              attendeeChanges: { addMemberIds: selected, removeEmails: [] },
+            };
+      const path = existing ? '/' + existing.id + '/edit' : '';
+      const result = await post(path, body);
+      expect(result.status).toBe(operation === 'create' ? 201 : 200);
+      const expected = [
+        {
+          memberId: addedMembers[1].id,
+          email: addedMembers[1].email,
+          displayName: addedMembers[1].displayName,
+        },
+        { memberId: attendee, email: teamUser.email, displayName: teamUser.displayName },
+        {
+          memberId: addedMembers[0].id,
+          email: addedMembers[0].email,
+          displayName: addedMembers[0].displayName,
+        },
+      ];
+      expect(result.body.meeting.attendees).toEqual(expected);
+      expect(
+        (
+          await pool.query(
+            'SELECT member_id AS "memberId",email,display_name AS "displayName" FROM meeting_attendees WHERE meeting_id=$1 ORDER BY email,member_id',
+            [result.body.meeting.id],
+          )
+        ).rows,
+      ).toEqual(expected);
+      await pool.query("UPDATE users SET display_name='Changed later' WHERE id=ANY($1::uuid[])", [
+        selected,
+      ]);
+      const replay = await post(
+        path,
+        operation === 'edit' ? { ...body, expectedUpdatedAt: result.body.meeting.updatedAt } : body,
+      );
+      expect(replay.status).toBe(200);
+      expect(replay.body.meeting).toEqual(result.body.meeting);
+    },
+  );
+  it.each(['create', 'edit'] as const)(
+    '%s rolls back the entire batch and other writes when an attendee insert fails',
+    async (operation) => {
+      await seedAddedMembers();
+      const existing = operation === 'edit' ? await create() : null;
+      const body =
+        operation === 'create'
+          ? { ...draft(), attendeeMemberIds: addedMembers.map((member) => member.id) }
+          : {
+              expectedUpdatedAt: existing.updatedAt,
+              title: 'Must rollback',
+              attendeeChanges: {
+                addMemberIds: addedMembers.map((member) => member.id),
+                removeEmails: [teamUser.email],
+              },
+            };
+      const path = existing ? '/' + existing.id + '/edit' : '';
+      await pool.query(
+        "CREATE FUNCTION fail_batch_attendee() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.email='alpha@example.test' THEN RAISE EXCEPTION 'injected batch failure'; END IF; RETURN NEW; END $$",
+      );
+      await pool.query(
+        'CREATE TRIGGER fail_batch_attendee BEFORE INSERT ON meeting_attendees FOR EACH ROW EXECUTE FUNCTION fail_batch_attendee()',
+      );
+      try {
+        const result = await post(path, body);
+        expect(result.status).toBe(503);
+        expect(JSON.stringify(result.body)).not.toContain('injected');
+        if (existing) {
+          expect((await get('/' + existing.id)).body.meeting).toEqual(existing);
+        } else {
+          expect(
+            (
+              await pool.query('SELECT id FROM meetings WHERE create_request_id=$1', [
+                (body as ReturnType<typeof draft>).requestId,
+              ])
+            ).rows,
+          ).toEqual([]);
+        }
+        expect(
+          (
+            await pool.query(
+              'SELECT member_id FROM meeting_attendees WHERE member_id=ANY($1::uuid[])',
+              [addedMembers.map((member) => member.id)],
+            )
+          ).rows,
+        ).toEqual([]);
+      } finally {
+        await pool.query('DROP TRIGGER fail_batch_attendee ON meeting_attendees');
+        await pool.query('DROP FUNCTION fail_batch_attendee()');
+      }
+      const retry = await post(path, body);
+      expect(retry.status).toBe(operation === 'create' ? 201 : 200);
+      expect(retry.body.meeting.attendees).toHaveLength(2);
+    },
+  );
+});
+
 describe('Creator lifecycle: immutable schedule and atomic changes', () => {
   it.each(['date', 'startsAt', 'endsAt'])(
     'rejects even unchanged locked field %s at API',
@@ -546,6 +674,24 @@ describe('Authorized summary and three section retrieval', () => {
     expect(r.body.groups.rejectedCancelled.items).toHaveLength(5);
     expect(r.body.groups.past.count).toBe(9);
     expect(r.body.groups.past.items).toHaveLength(5);
+    const smallFirst = await get('?date=' + date + '&pageSize=3');
+    expect(smallFirst.status).toBe(200);
+    expect(smallFirst.body.groups.upcomingCurrent).toMatchObject({
+      page: 1,
+      pageSize: 3,
+      total: 17,
+      totalPages: 6,
+    });
+    expect(smallFirst.body.groups.upcomingCurrent.items).toHaveLength(3);
+    const smallLast = await get(
+      '?date=' +
+        date +
+        '&section=upcomingCurrent&page=6&pageSize=3&snapshot=' +
+        encodeURIComponent(smallFirst.body.snapshot),
+    );
+    expect(smallLast.status).toBe(200);
+    expect(smallLast.body.group.items).toHaveLength(2);
+    expect(smallLast.body.group.totalPages).toBe(6);
     const cursor = r.body.snapshot;
     const next = await get(
       '?date=' + date + '&section=upcomingCurrent&page=2&snapshot=' + encodeURIComponent(cursor),
@@ -558,7 +704,13 @@ describe('Authorized summary and three section retrieval', () => {
       '?date=' + date + '&section=upcomingCurrent&page=3&snapshot=' + encodeURIComponent(cursor),
     );
     expect(beyond.status).toBe(200);
-    expect(beyond.body.group).toMatchObject({ items: [], page: 3, pageSize: 10, total: 17 });
+    expect(beyond.body.group).toMatchObject({
+      items: [],
+      page: 3,
+      pageSize: 10,
+      total: 17,
+      totalPages: 2,
+    });
     expect(beyond.body.referenceTime).toBe(r.body.referenceTime);
     const firstAgain = await get(
       '?date=' + date + '&section=upcomingCurrent&page=1&snapshot=' + encodeURIComponent(cursor),

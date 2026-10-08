@@ -21,10 +21,10 @@ vi.mock("./authController", () => ({
   initialAuthSnapshot: {},
 }));
 import {
-  useOnsiteCreate,
+  useMeetingCreate,
   type OnsiteDraft,
   type OnlineDraft,
-} from "./useOnsiteCreate";
+} from "./useMeetingCreate";
 const draft: OnsiteDraft = {
   title: "Interview",
   candidateName: "Candidate",
@@ -114,7 +114,7 @@ describe("Online create uses the existing owner-bound request state", () => {
     service.read
       .mockRejectedValueOnce(new MeetingError("NETWORK_ERROR"))
       .mockResolvedValue(saved);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     await act(async () => result.current.save(online));
     expect(result.current.phase).toBe("read-error");
     await act(async () => result.current.retry());
@@ -136,7 +136,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     async (error) => {
       const service = api();
       service.create.mockRejectedValueOnce(new MeetingError("NETWORK_ERROR"));
-      const { result } = renderHook(() => useOnsiteCreate(service));
+      const { result } = renderHook(() => useMeetingCreate(service));
       await act(async () => result.current.save(draft));
       const original = service.create.mock.calls[0][0];
       act(() => emit({ ...identity(), status: "checking", session: null }));
@@ -186,7 +186,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     async (denial) => {
       const service = api();
       service.create.mockRejectedValueOnce(new MeetingError("NETWORK_ERROR"));
-      const { result } = renderHook(() => useOnsiteCreate(service));
+      const { result } = renderHook(() => useMeetingCreate(service));
       await act(async () => result.current.save(draft));
       act(() => emit({ ...identity(), ...denial }));
       act(() => emit(identity()));
@@ -203,7 +203,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     const pending = deferred<Meeting>();
     const service = api();
     service.read.mockReturnValueOnce(pending.promise);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     let save: Promise<void> | undefined;
     act(() => {
       save = result.current.save(draft);
@@ -238,7 +238,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     service.create.mockRejectedValueOnce(
       new MeetingError("MEETING_DELETED", 410),
     );
-    const first = renderHook(() => useOnsiteCreate(service));
+    const first = renderHook(() => useMeetingCreate(service));
     await act(async () => first.result.current.save(draft));
     expect(first.result.current.phase).toBe("deleted");
     expect(first.result.current.locked).toBe(true);
@@ -261,7 +261,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     expect(service.create).toHaveBeenCalledOnce();
     expect(service.read).not.toHaveBeenCalled();
     first.unmount();
-    const next = renderHook(() => useOnsiteCreate(service));
+    const next = renderHook(() => useMeetingCreate(service));
     await act(async () => next.result.current.save(draft));
     expect(service.create.mock.calls[1][0].requestId).not.toBe(
       service.create.mock.calls[0][0].requestId,
@@ -272,7 +272,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     const pending = deferred<{ meeting: Meeting; created: boolean }>();
     const service = api();
     service.create.mockReturnValue(pending.promise);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     act(() => {
       void result.current.save(draft);
       void result.current.save(draft);
@@ -300,7 +300,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
   ])("retains immutable key and both field values after %s", async (error) => {
     const service = api();
     service.create.mockRejectedValueOnce(error);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     const mutable = { ...draft, attendeeMemberIds: ["member"] };
     await act(async () => result.current.save(mutable));
     const original = service.create.mock.calls[0][0];
@@ -323,7 +323,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
   it("retries only GET after acknowledged Save and failed readback", async () => {
     const service = api();
     service.read.mockRejectedValueOnce(new MeetingError("NETWORK_ERROR"));
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     await act(async () => result.current.save(draft));
     expect(result.current.phase).toBe("read-error");
     expect(result.current.meeting).toBeNull();
@@ -339,7 +339,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
         preparationNotes: "Invalid",
       }),
     );
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     await act(async () => result.current.save(draft));
     expect(result.current.locked).toBe(false);
     expect(result.current.fields).toEqual({ preparationNotes: "Invalid" });
@@ -354,7 +354,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     const pending = deferred<{ meeting: Meeting; created: boolean }>();
     const service = api();
     service.create.mockReturnValue(pending.promise);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     act(() => {
       void result.current.save(draft);
     });
@@ -379,7 +379,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     const pending = deferred<{ meeting: Meeting; created: boolean }>();
     const service = api();
     service.create.mockReturnValueOnce(pending.promise);
-    const { result } = renderHook(() => useOnsiteCreate(service));
+    const { result } = renderHook(() => useMeetingCreate(service));
     act(() => {
       void result.current.save(draft);
     });
@@ -400,7 +400,7 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
     async (status) => {
       const service = api();
       service.create.mockRejectedValueOnce(new MeetingError("DENIED", status));
-      const { result } = renderHook(() => useOnsiteCreate(service));
+      const { result } = renderHook(() => useMeetingCreate(service));
       await act(async () => result.current.save(draft));
       expect(mock.refresh).toHaveBeenCalledOnce();
       expect(service.create).toHaveBeenCalledOnce();
@@ -421,14 +421,14 @@ describe("Add save state — S1 two-field amendment, mocked M2/M3/auth", () => {
         },
       },
     };
-    const guest = renderHook(() => useOnsiteCreate(service));
+    const guest = renderHook(() => useMeetingCreate(service));
     await act(async () => guest.result.current.save(draft));
     expect(service.create).not.toHaveBeenCalled();
     guest.unmount();
     mock.snapshot = identity();
     const pending = deferred<{ meeting: Meeting; created: boolean }>();
     service.create.mockReturnValue(pending.promise);
-    const member = renderHook(() => useOnsiteCreate(service));
+    const member = renderHook(() => useMeetingCreate(service));
     act(() => {
       void member.result.current.save(draft);
     });

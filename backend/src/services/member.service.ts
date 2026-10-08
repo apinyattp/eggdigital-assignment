@@ -10,7 +10,7 @@ export class MemberService {
       .object({
         query: z.string().optional(),
         page: z.number().int().positive().safe(),
-        pageSize: z.literal(20),
+        pageSize: z.number().int().positive().max(20),
       })
       .safeParse({ query, page, pageSize });
     if (!input.success) throw new ApiError(400, 'VALIDATION_ERROR');
@@ -20,6 +20,11 @@ export class MemberService {
     const result = normalized
       ? await this.model.readPage(normalized, input.data.pageSize, offset)
       : { items: [], total: 0 };
-    return { ...result, page: input.data.page, pageSize: input.data.pageSize };
+    return {
+      ...result,
+      page: input.data.page,
+      pageSize: input.data.pageSize,
+      totalPages: Math.ceil(result.total / input.data.pageSize),
+    };
   }
 }

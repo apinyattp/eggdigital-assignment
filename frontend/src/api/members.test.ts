@@ -3,6 +3,68 @@ import { membersApi } from "./members";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("M1 member transport — TEST-MM-013/044", () => {
+  it.each([
+    ["legacy", 0],
+    ["legacy", 25],
+    ["current", 0],
+    ["current", 25],
+  ] as const)(
+    "normalizes %s member metadata with total %i on first and continuation pages",
+    async (format, total) => {
+      const totalPages = total === 0 ? 0 : 2;
+      for (const page of [1, 2]) {
+        const items = Array.from(
+          { length: total === 0 ? 0 : page === 1 ? 20 : 5 },
+          (_, index) => ({
+            id: `member-${page}-${index}`,
+            displayName: "Member",
+            email: `member-${page}-${index}@example.test`,
+          }),
+        );
+        const value = { items, total, page, pageSize: 20 };
+        const fetch = vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              ...value,
+              ...(format === "current" ? { totalPages } : {}),
+            }),
+          ),
+        );
+        vi.stubGlobal("fetch", fetch);
+        expect(await membersApi.search("member", page)).toEqual({
+          ...value,
+          totalPages,
+        });
+        const query = new URL(fetch.mock.calls[0][0]).searchParams;
+        expect(query.get("query")).toBe("member");
+        expect(query.get("page")).toBe(String(page));
+        expect(query.get("pageSize")).toBe("20");
+        expect(fetch).toHaveBeenCalledOnce();
+      }
+    },
+  );
+  it.each([{ total: -1 }, { page: 0 }, { pageSize: 10 }])(
+    "rejects invalid legacy member metadata %j instead of deriving a page count",
+    async (invalid) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              items: [],
+              total: 0,
+              page: 1,
+              pageSize: 20,
+              ...invalid,
+            }),
+          ),
+        ),
+      );
+      await expect(membersApi.search("member")).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
   it("does not request empty or whitespace queries", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -11,6 +73,7 @@ describe("M1 member transport — TEST-MM-013/044", () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -29,6 +92,7 @@ describe("M1 member transport — TEST-MM-013/044", () => {
           page: 2,
           pageSize: 20,
           total: 25,
+          totalPages: 2,
         }),
       ),
     );
@@ -50,8 +114,49 @@ describe("M1 member transport — TEST-MM-013/044", () => {
       page: 2,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
     });
   });
+  it.each([401, 403, 503])(
+    "preserves member continuation HTTP %i during rollout",
+    async (status) => {
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: { code: "SAFE_ERROR" } }), {
+            status,
+          }),
+        );
+      vi.stubGlobal("fetch", fetch);
+      await expect(membersApi.search("member", 2)).rejects.toMatchObject({
+        code: "SAFE_ERROR",
+        status,
+      });
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+  it.each([null, -1, 0, 1.5, "2"])(
+    "rejects inconsistent totalPages %j",
+    async (totalPages) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              items: [],
+              page: 1,
+              pageSize: 20,
+              total: 21,
+              totalPages,
+            }),
+          ),
+        ),
+      );
+      await expect(membersApi.search("member")).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
   it.each([401, 403, 503])(
     "preserves HTTP %s without turning failure into empty results",
     async (status) => {
@@ -70,11 +175,11 @@ describe("M1 member transport — TEST-MM-013/044", () => {
     },
   );
   it.each([
-    { items: [], page: 0, pageSize: 20, total: 0 },
-    { items: [{ id: "x" }], page: 1, pageSize: 20, total: 0 },
-    { items: [], page: 1, pageSize: 10, total: 0 },
+    { items: [], page: 0, pageSize: 20, total: 0, totalPages: 0 },
+    { items: [{ id: "x" }], page: 1, pageSize: 20, total: 0, totalPages: 0 },
+    { items: [], page: 1, pageSize: 10, total: 0, totalPages: 0 },
     { items: [], page: 1, pageSize: 20, total: -1 },
-    { items: [], page: 1, pageSize: 20, total: 0.5 },
+    { items: [], page: 1, pageSize: 20, total: 0.5, totalPages: 1 },
     null,
   ])("rejects malformed successful responses %j", async (value) => {
     vi.stubGlobal(

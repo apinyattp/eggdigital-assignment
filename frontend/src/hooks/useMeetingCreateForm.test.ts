@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   bangkokToday,
-  newOnsiteForm,
+  newMeetingCreateForm,
   validateOnsiteForm,
   validateOnlineForm,
-} from "./useOnsiteForm";
+} from "./useMeetingCreateForm";
 const now = new Date("2026-10-08T10:00:00+07:00");
 const valid = () => ({
-  ...newOnsiteForm(),
+  ...newMeetingCreateForm(),
   candidateName: "Name",
   candidateEmail: "name@example.test",
   title: "Interview",

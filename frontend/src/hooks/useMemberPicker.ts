@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MemberLookupError, membersApi, type Member } from "@/api/members";
 import { AuthError } from "@/api/auth/authError";
 import { Membership } from "@/enums/membership";
@@ -49,17 +49,21 @@ export function useMemberPicker(locked = false, api = membersApi) {
   const [state, setState] = useState<PickerState>(() =>
     empty(currentMemberId()),
   );
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<{
     generation: number;
     controller: AbortController | null;
   }>({ generation: 0, controller: null });
 
+  const invalidate = useCallback(() => {
+    if (debounce.current !== null) clearTimeout(debounce.current);
+    debounce.current = null;
+    request.current.generation++;
+    request.current.controller?.abort();
+    request.current.controller = null;
+  }, []);
+
   useEffect(() => {
-    const invalidate = () => {
-      request.current.generation++;
-      request.current.controller?.abort();
-      request.current.controller = null;
-    };
     const unsubscribe = authController.subscribe(() => {
       invalidate();
       const snapshot = authController.getSnapshot();
@@ -87,12 +91,19 @@ export function useMemberPicker(locked = false, api = membersApi) {
       unsubscribe();
       invalidate();
     };
-  }, []);
+  }, [invalidate]);
 
-  async function search(query: string, pageNumber = 1) {
+  useEffect(() => {
+    if (locked && debounce.current !== null) {
+      invalidate();
+      setState((previous) => ({ ...previous, phase: "idle" }));
+    }
+  }, [locked, invalidate]);
+
+  function search(query: string, pageNumber = 1, delay = false) {
     if (locked || !ownerId || currentMemberId() !== ownerId) return;
-    const generation = ++request.current.generation;
-    request.current.controller?.abort();
+    invalidate();
+    const generation = request.current.generation;
     const controller = new AbortController();
     request.current.controller = controller;
     const trimmed = query.trim();
@@ -109,54 +120,62 @@ export function useMemberPicker(locked = false, api = membersApi) {
       request.current.controller = null;
       return;
     }
-    try {
-      const page = await api.search(trimmed, pageNumber, controller.signal);
-      if (
-        controller.signal.aborted ||
-        generation !== request.current.generation ||
-        currentMemberId() !== ownerId
-      )
-        return;
-      setState((previous) => {
-        const byId = new Map(
-          (pageNumber > 1 ? previous.items : []).map((member) => [
-            member.id,
-            member,
-          ]),
-        );
-        for (const member of page.items)
-          if (member.id !== ownerId) byId.set(member.id, member);
-        return {
-          ...previous,
-          items: [...byId.values()],
-          page: page.page,
-          total: page.total,
-          phase: "ready",
-        };
-      });
-    } catch (error) {
-      if (
-        controller.signal.aborted ||
-        generation !== request.current.generation ||
-        currentMemberId() !== ownerId
-      )
-        return;
-      if (
-        error instanceof MemberLookupError &&
-        (error.status === 401 || error.status === 403)
-      ) {
-        setState(empty(null));
-        void authController.refresh();
-      } else
-        setState((previous) => ({
-          ...previous,
-          phase: "error",
-          failedPage: pageNumber,
-        }));
-    } finally {
-      if (generation === request.current.generation)
-        request.current.controller = null;
-    }
+    const lookup = async () => {
+      try {
+        const page = await api.search(trimmed, pageNumber, controller.signal);
+        if (
+          controller.signal.aborted ||
+          generation !== request.current.generation ||
+          currentMemberId() !== ownerId
+        )
+          return;
+        setState((previous) => {
+          const byId = new Map(
+            (pageNumber > 1 ? previous.items : []).map((member) => [
+              member.id,
+              member,
+            ]),
+          );
+          for (const member of page.items)
+            if (member.id !== ownerId) byId.set(member.id, member);
+          return {
+            ...previous,
+            items: [...byId.values()],
+            page: page.page,
+            total: page.total,
+            phase: "ready",
+          };
+        });
+      } catch (error) {
+        if (
+          controller.signal.aborted ||
+          generation !== request.current.generation ||
+          currentMemberId() !== ownerId
+        )
+          return;
+        if (
+          error instanceof MemberLookupError &&
+          (error.status === 401 || error.status === 403)
+        ) {
+          setState(empty(null));
+          void authController.refresh();
+        } else
+          setState((previous) => ({
+            ...previous,
+            phase: "error",
+            failedPage: pageNumber,
+          }));
+      } finally {
+        if (generation === request.current.generation)
+          request.current.controller = null;
+      }
+    };
+    if (delay) {
+      debounce.current = setTimeout(() => {
+        debounce.current = null;
+        void lookup();
+      }, 300);
+    } else return lookup();
   }
 
   const visible = ownerId !== null && state.ownerId === ownerId;
@@ -176,7 +195,7 @@ export function useMemberPicker(locked = false, api = membersApi) {
     hasMore: visible && state.page * 20 < state.total,
     disabled: locked || !visible,
     setQuery: (query: string) => {
-      void search(query);
+      void search(query, 1, true);
     },
     retry: () => {
       if (!request.current.controller)
@@ -190,9 +209,7 @@ export function useMemberPicker(locked = false, api = membersApi) {
       const member = items.find((item) => item.id === id);
       if (locked || !visible || !member || currentMemberId() !== ownerId)
         return;
-      request.current.generation++;
-      request.current.controller?.abort();
-      request.current.controller = null;
+      invalidate();
       setState((previous) => ({
         ...previous,
         query: "",
