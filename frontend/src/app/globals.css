@@ -1,0 +1,142 @@
+@font-face {
+  font-family: "IBM Plex Sans Thai";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/fonts/font-00.ttf) format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Thai";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/fonts/font-01.ttf) format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Thai";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(/assets/fonts/font-02.ttf) format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Thai";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/assets/fonts/font-03.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/fonts/font-04.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/fonts/font-05.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(/assets/fonts/font-06.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/assets/fonts/font-07.ttf) format("truetype");
+}
+
+@font-face {
+  font-family: "Google Sans Button";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/fonts/google-sans-medium.ttf) format("truetype");
+}
+:root {
+  --login-background: #f8f6fa;
+  --brand-yellow: #ffc600;
+  --muted: #5f5b66;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: #333;
+  background: #f7f7f5;
+  font:
+    16px/1.65 Rubik,
+    "IBM Plex Sans Thai",
+    Arial,
+    sans-serif;
+}
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+p {
+  margin-bottom: 14px;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 17px;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+button,
+input,
+textarea,
+select {
+  outline-offset: 4px;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid #6033b3;
+}
+
+/* Final approved high-fidelity tokens shared by all workspace routes. */
+:root {
+  --ink: #333;
+  --muted: #666;
+  --line: #dad6e0;
+  --soft: #f8f6fa;
+  --paper: #fff;
+  --brand-yellow: #ffc600;
+  --focus-ring: #6033b3;
+}
+h1,
+h2,
+h3 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+}
+body.saved-toast-visible {
+  padding-bottom: 92px;
+}
+@media (max-width: 600px) {
+  body.saved-toast-visible {
+    padding-bottom: 100px;
+  }
+}

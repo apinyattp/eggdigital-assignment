@@ -2,7 +2,7 @@
 
 เปิดต้นแบบได้จากไฟล์ HTML โดยไม่ต้องติดตั้งแอปหรือรัน backend:
 
-- [Wireframe](wireframe.html): หน้าจอแบบโครงร่าง
+- [Wireframe](index.html): หน้าจอแบบโครงร่าง
 - [UI design](ui-design.html): หน้าจอพร้อมสีและองค์ประกอบ
 - [คู่มือทดลอง](preview-guide.html): วิธีดูสถานะและข้อมูลตัวอย่าง
 
@@ -42,7 +42,7 @@ flowchart TD
 python3 -m http.server 8080 --bind 127.0.0.1 --directory doc
 ```
 
-จากนั้นเปิด [UI design บนเครื่องตนเอง](http://127.0.0.1:8080/ui-design.html) หรือ [Wireframe](http://127.0.0.1:8080/wireframe.html) และหยุด server ด้วย Ctrl+C เมื่อดูเสร็จ หาก port8080 ถูกใช้ ให้เปลี่ยนเป็น8081ทั้งในคำสั่งและ URL GitHub แสดง source ของ HTML; ให้ดาวน์โหลดหรือ clone repository เพื่อเปิดต้นแบบ
+จากนั้นเปิด [UI design บนเครื่องตนเอง](http://127.0.0.1:8080/ui-design.html) หรือ [Wireframe](http://127.0.0.1:8080/index.html) และหยุด server ด้วย Ctrl+C เมื่อดูเสร็จ หาก port8080 ถูกใช้ ให้เปลี่ยนเป็น8081ทั้งในคำสั่งและ URL GitHub แสดง source ของ HTML; ให้ดาวน์โหลดหรือ clone repository เพื่อเปิดต้นแบบ
 
 ## ลองสถานะและผลที่ควรเห็น
 

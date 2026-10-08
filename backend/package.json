@@ -1,0 +1,44 @@
+{
+  "name": "eggdigital-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run tests/unit.test.ts tests/http.test.ts tests/internal-auth.test.ts tests/onsite.test.ts tests/pagination.test.ts",
+    "test:integration": "vitest run tests/integration.test.ts tests/onsite.integration.test.ts tests/meeting-development.integration.test.ts tests/notes-feedback.integration.test.ts tests/manual-link.integration.test.ts --no-file-parallelism",
+    "migrate": "node --import tsx scripts/migrate.ts",
+    "seed:login": "node --import tsx scripts/seed-login.ts",
+    "setup:local": "node --import tsx scripts/setup-local.ts",
+    "setup:bridge": "node --import tsx scripts/setup-bridge.ts",
+    "test:integration:isolated": "node --import tsx scripts/test-isolated.ts",
+    "smoke:local": "node --import tsx scripts/smoke-local.ts",
+    "format:check": "prettier --check src tests scripts migrations package.json tsconfig.json"
+  },
+  "dependencies": {
+    "argon2": "0.45.1",
+    "express": "5.2.1",
+    "google-auth-library": "11.1.0",
+    "jose": "6.2.12",
+    "node-pg-migrate": "9.0.0",
+    "pg": "8.23.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "24.19.1",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "prettier": "3.9.9",
+    "supertest": "7.3.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  }
+}

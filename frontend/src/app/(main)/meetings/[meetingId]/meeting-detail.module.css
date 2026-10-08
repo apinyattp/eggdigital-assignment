@@ -1,0 +1,825 @@
+.shell {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  color: #333;
+}
+.shell a {
+  color: inherit;
+}
+.heading {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 28px;
+}
+.heading h1,
+.heading h2 {
+  margin-bottom: 0;
+}
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: #5f5b66;
+  margin-bottom: 0;
+}
+.profile {
+  background: #fff;
+  border: 1px solid #e8e6dd;
+  border-radius: 22px;
+  padding: 0;
+  overflow: hidden;
+  margin-bottom: 25px;
+}
+.profilePerson {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+  padding: 28px 32px;
+  background: #ffc600;
+}
+.profileStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 18px 32px;
+  background: #fff;
+}
+.statusReadback {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+}
+.statusReadback > span {
+  font-size: 12px;
+  color: #68675e;
+  font-weight: 400;
+}
+.profile h2 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.7px;
+  color: #202020;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.profile p {
+  margin: 0;
+}
+.status {
+  background: transparent;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 24px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.panel {
+  min-width: 0;
+  background: #f8f8f6;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  padding: 26px;
+}
+.panel h2 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+  font-weight: 500;
+  color: #333;
+  font-size: 22px;
+}
+.panel h3 {
+  font-size: 15px;
+}
+.access {
+  color: #6033b3;
+  background: #f2ebff;
+  padding: 5px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.help {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #5f5b66;
+}
+.data {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 16px;
+  font-size: 13px;
+}
+.data dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.preparation {
+  border-top: 1px solid #ddd;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.shell label,
+.dialog label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.shell textarea,
+.dialog textarea {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #b3aabb;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+}
+.shell button,
+.dialog button {
+  border: 1px solid transparent;
+  border-radius: 24px;
+  color: #383833;
+  background: #efefeb;
+  padding: 10px 20px;
+  font-size: 14px;
+  min-height: 44px;
+}
+.shell button:hover,
+.dialog button:hover {
+  background: #e5e5de;
+}
+.shell :focus-visible,
+.dialog :focus-visible {
+  outline: 3px solid #6033b3;
+  outline-offset: 3px;
+}
+.shell :disabled,
+.dialog :disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.shell [aria-invalid="true"],
+.dialog [aria-invalid="true"] {
+  border-color: #b3261e;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.notice {
+  padding: 14px;
+  border: 1px solid #e5d99f;
+  border-radius: 12px;
+  background: #fff7df;
+  font-size: 13px;
+  margin-top: 14px;
+}
+.error {
+  color: #b3261e;
+  font-size: 13px;
+}
+.success {
+  color: #2f6545;
+  font-size: 13px;
+  margin-top: 12px;
+}
+.participants {
+  background: #f8f8f6;
+}
+.members {
+  padding: 0;
+  list-style: none;
+}
+.members li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid #e2dce8;
+  padding: 12px 0;
+}
+.members li div {
+  min-width: 0;
+}
+.members strong,
+.members .help {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+.feedbackPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.feedbackPanel > * {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.history {
+  max-height: min(60vh, 480px);
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+  padding: 14px 8px 8px 0;
+  margin-top: 16px;
+}
+.history h3 {
+  font-size: 14px;
+}
+.history h3 .help {
+  display: block;
+}
+.entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0 14px 18px;
+  border-left: 2px solid #dddcd6;
+  border-bottom: 1px solid #e6e2e9;
+  margin-bottom: 20px;
+}
+.entryBody {
+  flex: 1;
+  min-width: 0;
+}
+.entry h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 650;
+  color: #353339;
+}
+.entry p {
+  margin-bottom: 8px;
+}
+.entryEditable {
+  display: grid;
+  grid-template-columns: 70% 30%;
+  align-items: stretch;
+  gap: 0;
+}
+.entryEditable .entryBody {
+  padding-right: 12px;
+}
+.entryActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+}
+.shell .edit {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 13px;
+  background: #e7e7e2;
+  color: #565650;
+  border: 0;
+  box-shadow: none;
+  border-radius: 50%;
+  scroll-margin-block: 8px;
+}
+.shell .edit:hover:not(:disabled) {
+  background: #dcdcd6;
+}
+.shell .edit:focus-visible {
+  outline: 3px solid #6033b3;
+  outline-offset: 2px;
+}
+.shell .edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.older {
+  text-align: center;
+  margin-bottom: 18px;
+}
+.dialog {
+  width: min(550px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  border: 0;
+  border-radius: 28px;
+  padding: 32px;
+  overflow: auto;
+  color: #353039;
+}
+.dialog::backdrop {
+  background: #30342965;
+  backdrop-filter: blur(3px);
+}
+.dialog h2 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+  font-size: 27px;
+}
+.dialog .primary {
+  background: #ffc600;
+  color: #24200e;
+}
+.dialog .primary:hover {
+  background: #efbc16;
+}
+@media (min-width: 1001px) {
+  .columns {
+    align-items: stretch;
+  }
+  .stack > section:first-child {
+    flex: 0 0 auto;
+  }
+  .notesPanel {
+    flex: 1 0 auto;
+  }
+  .secondary {
+    min-height: 0;
+  }
+  .secondary > .feedbackPanel {
+    flex: 1 0 auto;
+    min-height: 0;
+  }
+  .feedbackPanel > .history {
+    flex: 1 1 auto;
+    max-height: 480px;
+  }
+}
+@media (max-width: 1000px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .profilePerson {
+    padding: 24px 20px;
+  }
+  .profileStatus {
+    padding: 18px 20px;
+    display: block;
+  }
+}
+@media (max-width: 600px) {
+  .shell {
+    padding: 0;
+  }
+  .panel {
+    padding: 20px 18px;
+  }
+  .heading {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .heading h2 {
+    font-size: 20px;
+  }
+  .profile h2 {
+    font-size: 27px;
+  }
+  .data {
+    grid-template-columns: 96px minmax(0, 1fr);
+    font-size: 12px;
+  }
+  .dialog {
+    padding: 24px 18px;
+  }
+  .dialog .actions button {
+    flex: 1;
+  }
+}
+
+/* Final high-fidelity Detail values; shared WorkspaceShell owns outer padding. */
+.shell h1 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.7px;
+  color: #222;
+  margin: 0;
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-height: 44px;
+  padding: 10px 20px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #efefeb;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.05px;
+  text-decoration: none;
+}
+.back:hover {
+  background: #e5e5de;
+}
+.profilePerson > div {
+  min-width: 0;
+}
+.profilePerson p {
+  font-size: 14px;
+  color: #45402d;
+}
+.profileAvatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #fff;
+  color: #6e5300;
+}
+.profileAvatar svg {
+  width: 30px;
+  height: 30px;
+}
+.panel .heading {
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.data {
+  margin: 0;
+}
+.data dt {
+  color: #5f5b66;
+}
+.notesPanel {
+  display: flex;
+  flex-direction: column;
+}
+.notesPanel textarea {
+  flex: 1;
+  min-height: 180px;
+}
+.notesPanel .actions {
+  padding-top: 16px;
+  margin-top: 0;
+}
+.notesPanel > .help {
+  margin: 5px 0 14px;
+}
+.history {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+}
+.history h3 {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #68616f;
+  margin: 8px 0 12px;
+}
+.entry .text,
+.entry .help {
+  font-size: 12px;
+  line-height: 1.65;
+}
+.dialog textarea {
+  min-height: 15rem;
+}
+@media (max-width: 1023px) {
+  .dialog textarea {
+    min-height: 12rem;
+  }
+}
+@media (max-width: 1000px) {
+  .profilePerson {
+    gap: 16px;
+  }
+  .columns {
+    display: flex;
+    flex-direction: column;
+  }
+  .stack {
+    display: contents;
+  }
+  .stack > section:first-child {
+    order: 1;
+  }
+  .secondary > .participants {
+    order: 2;
+  }
+  .notesPanel {
+    order: 3;
+  }
+  .secondary > .feedbackPanel {
+    order: 4;
+  }
+}
+@media (max-width: 600px) {
+  .shell h1 {
+    font-size: 29px;
+  }
+  .dialog textarea {
+    min-height: 9rem;
+  }
+}
+@media (max-height: 450px) {
+  .dialog textarea {
+    min-height: 7rem;
+  }
+}
+
+.saveSpinner {
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: saveSpin 750ms linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+@keyframes saveSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .saveSpinner {
+    animation: none;
+  }
+}
+.shell .deleteRow {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 16px;
+  margin-top: 28px;
+}
+.deleteRow > div {
+  min-width: 0;
+  flex: 1;
+}
+.deleteRow > button {
+  flex: none;
+  white-space: nowrap;
+}
+.shell dialog.lifecycleDialog {
+  border-radius: 28px;
+  padding: 32px;
+}
+.shell dialog.lifecycleDialog h2 {
+  font-family: Rubik, "IBM Plex Sans Thai", sans-serif;
+  font-size: 27px;
+}
+@media (max-width: 600px) {
+  .shell .deleteRow {
+    padding: 18px 16px;
+    gap: 12px;
+  }
+  .deleteRow strong {
+    display: block;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .deleteRow p {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .shell .deleteRow button {
+    font-size: 12px;
+    padding: 10px 12px;
+  }
+  .shell dialog.lifecycleDialog {
+    padding: 27px 23px;
+  }
+  .shell dialog.lifecycleDialog h2 {
+    font-size: 23px;
+  }
+}
+
+/* Final reference action row and natural-height empty History. */
+.shell .creatorActions {
+  border-top: 1px solid #ddd;
+  padding-top: 16px;
+  margin-top: 16px;
+  gap: 12px;
+}
+.shell .creatorActions .meetingEdit {
+  width: 156px;
+  height: 48px;
+  min-height: 48px;
+  padding: 10px 18px;
+  line-height: 24px;
+  gap: 8px;
+  font-weight: 500;
+}
+.shell .creatorActions .meetingCancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #fceeed;
+  color: #a92e28;
+  font-weight: 500;
+}
+.shell .creatorActions .meetingCancel:hover:not(:disabled) {
+  background: #f8dfdc;
+}
+.creatorActions svg,
+.addFeedback svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.feedbackFooter {
+  padding-top: 16px;
+}
+.feedbackFooter .help {
+  margin: 8px 0 0;
+}
+.feedbackFooter .help:empty {
+  display: none;
+}
+.shell .addFeedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.timezone {
+  display: inline;
+  font-size: 12px;
+  font-weight: 400;
+  color: #68616f;
+}
+.secondary > .compactFeedback {
+  flex: 0 0 auto;
+}
+.compactFeedback > .history {
+  flex: 0 1 auto;
+}
+@media (max-width: 600px) {
+  .shell .creatorActions .meetingEdit,
+  .shell .creatorActions .meetingCancel {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 12px;
+    gap: 0;
+  }
+  .creatorActions .actionLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* Reference .history-read-state .save-error: inline recovery, no notice box. */
+.feedbackReadError {
+  color: #a32f2f;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+.feedbackReadError p {
+  margin: 0;
+}
+.feedbackReadError button {
+  display: block;
+  margin-top: 8px;
+}
+
+.shell .creatorActions .joinMeeting {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  width: 156px;
+  max-width: 100%;
+  height: 48px;
+  min-height: 48px;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  background: #ffc600;
+  color: #24200e;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.shell .creatorActions .joinMeeting:hover {
+  background: #e0b537;
+}
+.shell .creatorActions .joinMeeting:active {
+  background: #e2b221;
+}
+
+.statusSaveGroup {
+  width: 300px;
+  flex: none;
+}
+.statusActions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+.shell .statusActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.statusActions svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.shell .statusActions .statusConfirm {
+  background: #def4e7;
+  color: #20633d;
+}
+.shell .statusActions .statusConfirm:hover {
+  background: #ccebd9;
+}
+.shell .statusActions .statusReject {
+  background: #fce7e7;
+  color: #a43939;
+}
+.shell .statusActions .statusReject:hover {
+  background: #f7d6d6;
+}
+.shell .statusActions .statusConfirm[aria-pressed="true"] {
+  background: #247a4c;
+  color: #fff;
+}
+.shell .statusActions .statusReject[aria-pressed="true"] {
+  background: #b3261e;
+  color: #fff;
+}
+.shell .statusActions[data-saving="true"] button:disabled {
+  opacity: 1;
+  cursor: wait;
+}
+@media (max-width: 1000px) {
+  .statusSaveGroup {
+    width: 100%;
+  }
+  .statusActions {
+    margin-top: 16px;
+  }
+}
