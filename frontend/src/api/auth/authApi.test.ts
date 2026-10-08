@@ -78,6 +78,25 @@ describe("auth HTTP adapter (mocked fetch)", () => {
       code: "INVALID_RESPONSE",
     });
   });
+  it.each(["cancel", "signout", "backend"])(
+    "attempts every cleanup leg but rejects an unacknowledged %s leg",
+    async (failedLeg) => {
+      library.signOut.mockClear();
+      library.signOut.mockImplementation(async () => {
+        if (failedLeg === "signout") throw new Error("signout failed");
+        return { url: "/login" };
+      });
+      const fetch = vi.fn(async (url: string) => {
+        const leg = url === "/api/auth/attempt" ? "cancel" : "backend";
+        return new Response(null, { status: leg === failedLeg ? 503 : 204 });
+      });
+      vi.stubGlobal("fetch", fetch);
+      await expect(authApi.logout()).rejects.toThrow();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(library.signOut).toHaveBeenCalledOnce();
+      expect(fetch.mock.calls[1][0]).toMatch(/auth\/logout$/);
+    },
+  );
   it("never calls Credentials if start fails or logout intent arrives while start settles", async () => {
     library.signIn.mockClear();
     vi.stubGlobal(

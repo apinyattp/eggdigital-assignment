@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceShell } from "./WorkspaceShell";
@@ -84,5 +84,52 @@ describe("approved common Member navigation", () => {
     expect(screen.getByRole("button", { name: "Logout" })).toHaveFocus();
     await events.click(screen.getByRole("button", { name: "Logout" }));
     expect(onLogout).toHaveBeenCalledOnce();
+  });
+  it.each(["button", "span", "svg"])(
+    "keeps the account menu open through an inside touch blur on %s",
+    async (target) => {
+      const events = userEvent.setup();
+      const onLogout = vi.fn();
+      render(
+        <WorkspaceShell user={user} onLogout={onLogout}>
+          Content
+        </WorkspaceShell>,
+      );
+      const toggle = screen.getByRole("button", { name: "Account" });
+      await events.click(toggle);
+      const button = screen.getByRole("button", { name: "Logout" });
+      const touched =
+        target === "button" ? button : button.querySelector(target)!;
+      fireEvent.pointerDown(touched, { pointerType: "touch" });
+      fireEvent.blur(button, { relatedTarget: null });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.pointerUp(touched, { pointerType: "touch" });
+      fireEvent.click(touched);
+      expect(onLogout).toHaveBeenCalledOnce();
+    },
+  );
+  it("still dismisses on outside pointers, Tab, Escape and blur without a pointer", async () => {
+    const events = userEvent.setup();
+    render(
+      <WorkspaceShell user={user} onLogout={vi.fn()}>
+        <button>Outside</button>
+      </WorkspaceShell>,
+    );
+    const toggle = screen.getByRole("button", { name: "Account" });
+    await events.click(toggle);
+    await events.click(screen.getByRole("button", { name: "Outside" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await events.click(toggle);
+    await events.tab();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await events.click(toggle);
+    await events.keyboard("{Escape}");
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await events.click(toggle);
+    fireEvent.blur(screen.getByRole("button", { name: "Logout" }), {
+      relatedTarget: null,
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });

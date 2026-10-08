@@ -98,6 +98,19 @@ const fixture = createServer(async (req, res) => {
       id_token: idToken(code.wrongNonce ? "wrong-nonce" : code.nonce),
     });
   }
+  if (req.url === "/api/v1/auth/session") {
+    const access = req.headers.cookie;
+    if (
+      ![
+        "mm_access=synthetic.google.signature",
+        "mm_access=synthetic.password.signature",
+      ].includes(access)
+    )
+      return json(401, { error: { code: "UNAUTHENTICATED" } });
+    return json(200, {
+      user: { id: "synthetic-member", membership: "member" },
+    });
+  }
   if (req.url === "/internal/auth/issue") {
     issuerCalls++;
     if (
@@ -267,7 +280,9 @@ try {
   }
   assert.ok(ready, `Isolated library server ready: ${probe}`);
   browser = await chromium.launch({
-    channel: process.env.PLAYWRIGHT_CHANNEL ?? "chrome",
+    ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH
+      ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH }
+      : { channel: process.env.PLAYWRIGHT_CHANNEL ?? "chrome" }),
     headless: true,
   });
   {
@@ -298,6 +313,19 @@ try {
       "session_read_no_reissue_no_token_JSON",
       issuerCalls === before + 1 &&
         Object.keys(session).join(",") === "expires",
+    );
+    await cancel(context);
+    check(
+      "acknowledged_cancel_and_signout_remove_session_and_access_cookies",
+      !(await context.cookies()).some(
+        (c) => c.name === "mm_access" || c.name.includes("session-token"),
+      ),
+    );
+    check(
+      "session_stays_anonymous_after_acknowledged_signout",
+      Object.keys(
+        await (await context.request.get(`${origin}/api/auth/session`)).json(),
+      ).length === 0,
     );
     await context.close();
   }

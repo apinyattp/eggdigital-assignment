@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "node tests/auth.browser.mjs",
-    "test:library": "node tests/auth-library.browser.mjs"
+    "test:library": "node tests/auth-library.browser.mjs",
+    "test:logout": "node tests/logout.browser.mjs"
   },
   "dependencies": {
     "next": "16.4.0",
