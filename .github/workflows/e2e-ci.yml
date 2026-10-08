@@ -1,0 +1,53 @@
+name: Real-stack E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Real-stack E2E (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - name: Type-check the database fixture
+        run: npm --prefix backend run typecheck:e2e
+      - name: Install browser and host dependencies
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps ${{ matrix.browser }}
+      - name: Exercise the real frontend, API and isolated database
+        env:
+          E2E_BROWSERS: ${{ matrix.browser }}
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/e2e-results
+        run: npm --prefix frontend run test:e2e
+      - name: Upload safe failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.browser }}-failure
+          path: |
+            ${{ runner.temp }}/e2e-results/**/*.png
+            ${{ runner.temp }}/e2e-results/**/results.json
+            ${{ runner.temp }}/e2e-results/run.json
+          if-no-files-found: ignore
+          retention-days: 3
