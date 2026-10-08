@@ -12,7 +12,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run tests/unit.test.ts tests/http.test.ts tests/internal-auth.test.ts tests/onsite.test.ts tests/pagination.test.ts",
-    "test:integration": "vitest run tests/integration.test.ts tests/onsite.integration.test.ts tests/meeting-development.integration.test.ts tests/notes-feedback.integration.test.ts tests/manual-link.integration.test.ts --no-file-parallelism",
+    "test:integration": "vitest run tests/integration.test.ts tests/onsite.integration.test.ts tests/meeting-development.integration.test.ts tests/notes-feedback.integration.test.ts tests/manual-link.integration.test.ts tests/provider-storage-migration.integration.test.ts --no-file-parallelism",
     "migrate": "node --import tsx scripts/migrate.ts",
     "seed:login": "node --import tsx scripts/seed-login.ts",
     "setup:local": "node --import tsx scripts/setup-local.ts",

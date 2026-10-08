@@ -101,7 +101,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   currentTime = '2026-10-08T03:00:00.000Z';
   await pool.query(
-    'TRUNCATE meeting_provider_cleanup,meeting_calendar_links,meeting_provider_operations,provider_connections,interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
+    'TRUNCATE interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
   );
   await seedLoginFixtures(pool, password);
 });

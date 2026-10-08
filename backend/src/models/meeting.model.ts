@@ -31,8 +31,6 @@ export type MeetingView = {
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
   format: 'ONSITE' | 'ONLINE';
   location: string | null;
-  meetingProvider: 'GOOGLE_MEET' | 'ZOOM' | null;
-  externalMeetingId: string | null;
   joinUrl?: string | null;
   attendees: { memberId: string | null; displayName: string; email: string }[];
   createdAt: string;
@@ -54,7 +52,7 @@ export type MeetingMutation = {
 const meetingProjection = `SELECT m.id, m.creator_id AS "creatorId", m.title, m.description, m.preparation_notes AS "preparationNotes",
          json_build_object('name',m.candidate_name,'email',m.candidate_email) AS candidate,
          m.position, to_char(m.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "startsAt", to_char(m.ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "endsAt", m.status, m.format,
-         m.location, m.meeting_provider AS "meetingProvider", m.external_meeting_id AS "externalMeetingId",
+         m.location,
          to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt", to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt",
          COALESCE((SELECT json_agg(json_build_object('memberId',a.member_id,'displayName',a.display_name,'email',a.email)
            ORDER BY a.email,a.member_id) FROM (
@@ -80,13 +78,8 @@ const feedbackProjection = `SELECT id,content AS text,json_build_object('display
 export class MeetingModel {
   constructor(private pool: Pool) {}
   private get projection() {
-    // Retain read-only access to stored historical links; no provider clients or mutations.
     const join = `CASE WHEN m.format='ONLINE' AND m.status<>'CANCELLED'
-      THEN COALESCE(m.manual_join_url,
-        CASE WHEN NOT EXISTS(SELECT 1 FROM meeting_provider_cleanup c WHERE c.meeting_id=m.id)
-        THEN (SELECT o.join_url FROM meeting_provider_operations o WHERE o.creator_id=m.creator_id
-          AND o.request_id=m.create_request_id AND o.phase='COMPLETED') ELSE NULL END)
-      ELSE NULL END`;
+      THEN m.manual_join_url ELSE NULL END`;
     return meetingProjection + ', ' + join + ' AS "joinUrl"';
   }
   async findById(creatorId: string, meetingId: string): Promise<MeetingView | null> {
@@ -129,8 +122,8 @@ export class MeetingModel {
       if (members.length !== input.attendeeMemberIds.length)
         throw new ApiError(400, 'VALIDATION_ERROR', { attendeeMemberIds: 'ไม่พบสมาชิกที่เลือก' });
       const inserted = await client.query<{ id: string }>(
-        `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,meeting_provider,external_meeting_id,manual_join_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,manual_join_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id`,
         [
           randomUUID(),
@@ -147,8 +140,6 @@ export class MeetingModel {
           input.format,
           input.location,
           input.preparationNotes,
-          null,
-          null,
           input.joinUrl ?? null,
         ],
       );

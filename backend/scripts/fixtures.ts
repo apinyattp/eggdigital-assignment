@@ -29,8 +29,8 @@ export async function seedLoginFixtures(pool: Pool, password: string) {
         [id, email, name, credential, '2026-10-07T00:00:00Z'],
       );
     await client.query(
-      `INSERT INTO meetings(id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,meeting_provider,external_meeting_id,created_at,updated_at)
-      VALUES($1,$2,$3,'Candidate denial fixture',NULL,'Candidate Test','candidate01@example.test','Test role','2026-10-08T02:00:00Z','2026-10-08T03:00:00Z','PENDING','ONSITE',NULL,NULL,NULL,'2026-10-07T00:00:00Z','2026-10-07T00:00:00Z') ON CONFLICT DO NOTHING`,
+      `INSERT INTO meetings(id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,created_at,updated_at)
+      VALUES($1,$2,$3,'Candidate denial fixture',NULL,'Candidate Test','candidate01@example.test','Test role','2026-10-08T02:00:00Z','2026-10-08T03:00:00Z','PENDING','ONSITE',NULL,'2026-10-07T00:00:00Z','2026-10-07T00:00:00Z') ON CONFLICT DO NOTHING`,
       [fixtureIds.meeting, fixtureIds.member, '30000000-0000-4000-8000-000000000001'],
     );
     await client.query(

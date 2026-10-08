@@ -123,7 +123,7 @@ describe('TEST-MM-023/025/027 B1 common issuer with real PostgreSQL', () => {
 });
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE meeting_provider_cleanup,meeting_calendar_links,meeting_provider_operations,provider_connections,interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
+    'TRUNCATE interview_notes,meeting_feedback,deleted_meeting_requests,meeting_attendees,meetings,users',
   );
   await seedLoginFixtures(pool, password);
 });
@@ -131,7 +131,7 @@ afterAll(async () => {
   await pool.end();
 });
 describe('TEST-MM-054 pinned real PostgreSQL schema/fixtures', () => {
-  it('has exact 5/19/4 field counts and no login session/revocation schema', async () => {
+  it('has exact 5/17/4 field counts and no login session/revocation schema', async () => {
     const rows = (
       await pool.query(
         "SELECT table_name,count(*)::int AS count FROM information_schema.columns WHERE table_schema='public' GROUP BY table_name",
@@ -139,17 +139,22 @@ describe('TEST-MM-054 pinned real PostgreSQL schema/fixtures', () => {
     ).rows;
     for (const [name, count] of [
       ['users', 5],
-      ['meetings', 19],
+      ['meetings', 17],
       ['meeting_attendees', 4],
-      ['provider_connections', 15],
-      ['meeting_provider_operations', 16],
-      ['meeting_calendar_links', 7],
-      ['meeting_provider_cleanup', 21],
     ])
       expect(rows.find((r) => r.table_name === name)?.count).toBe(count);
     expect(
       rows.some((r) =>
-        ['sessions', 'auth_version', 'refresh_tokens', 'revocations'].includes(r.table_name),
+        [
+          'sessions',
+          'auth_version',
+          'refresh_tokens',
+          'revocations',
+          'provider_connections',
+          'meeting_provider_operations',
+          'meeting_calendar_links',
+          'meeting_provider_cleanup',
+        ].includes(r.table_name),
       ),
     ).toBe(false);
     const columns = (
@@ -163,11 +168,13 @@ describe('TEST-MM-054 pinned real PostgreSQL schema/fixtures', () => {
       'candidate_email_key',
       'create_payload_hash',
       'google_id',
+      'meeting_provider',
+      'external_meeting_id',
     ])
       expect(columns.includes(forbidden)).toBe(false);
     expect(
       (await pool.query('SELECT count(*)::int AS count FROM pgmigrations')).rows[0].count,
-    ).toBe(11);
+    ).toBe(12);
   });
   it('enforces canonical/unique email and data constraints in real SQL', async () => {
     await expect(
@@ -187,16 +194,14 @@ describe('TEST-MM-054 pinned real PostgreSQL schema/fixtures', () => {
       '23514',
     );
     await expect(
-      pool.query("UPDATE meetings SET meeting_provider='ZOOM',external_meeting_id='123'"),
+      pool.query("UPDATE meetings SET manual_join_url='https://example.test/room'"),
     ).rejects.toHaveProperty('code', '23514');
-    const meeting = (
-      await pool.query('SELECT format,location,meeting_provider,external_meeting_id FROM meetings')
-    ).rows[0];
+    const meeting = (await pool.query('SELECT format,location,manual_join_url FROM meetings'))
+      .rows[0];
     expect(meeting).toEqual({
       format: 'ONSITE',
       location: null,
-      meeting_provider: null,
-      external_meeting_id: null,
+      manual_join_url: null,
     });
   });
   it('preserves FK and fixture transaction atomicity', async () => {

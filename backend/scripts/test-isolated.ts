@@ -64,6 +64,7 @@ try {
     'tests/meeting-development.integration.test.ts',
     'tests/notes-feedback.integration.test.ts',
     'tests/manual-link.integration.test.ts',
+    'tests/provider-storage-migration.integration.test.ts',
   ]) {
     const port = docker(['port', name, '5432/tcp']).split(':').pop();
     if (!port || !/^\d+$/.test(port)) throw new Error('Isolated port unavailable');
