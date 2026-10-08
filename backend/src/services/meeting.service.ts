@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import type { MeetingModel } from '../models/meeting.model.js';
+import type { MeetingModel, MeetingMutation } from '../models/meeting.model.js';
 import type { UserView } from './auth.service.js';
 import { ApiError } from '../utils/api-error.js';
 import { signSnapshot, verifySnapshot } from '../utils/signed-snapshot.js';
@@ -50,6 +50,83 @@ const bangkokDate = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 });
+type MeetingMutationOperation = 'edit' | 'team' | 'cancel';
+type ParsedMeetingMutation = MeetingMutation & {
+  addMemberIds?: string[];
+  removeEmails?: string[];
+};
+
+function parseMeetingMutation(
+  body: unknown,
+  operation: MeetingMutationOperation,
+): ParsedMeetingMutation {
+  const version = instant.regex(/Z$/).refine((value) => !/\.\d{7}/.test(value));
+  const team = z
+    .object({
+      addMemberIds: z.array(z.uuid().transform((v) => v.toLowerCase())),
+      removeEmails: z.array(z.string().trim().toLowerCase().pipe(z.email())),
+    })
+    .strict();
+  const optionalMutationText = z
+    .string()
+    .nullable()
+    .transform((v) => (v?.trim() ? v : null))
+    .optional();
+  const base = z.object({ expectedUpdatedAt: version });
+  const schema =
+    operation === 'cancel'
+      ? base.strict()
+      : operation === 'team'
+        ? base.extend(team.shape).strict()
+        : base
+            .extend({
+              title: z.string().trim().min(1).optional(),
+              candidateName: z.string().trim().min(1).optional(),
+              candidateEmail: z.string().trim().toLowerCase().pipe(z.email()).optional(),
+              position: z.string().trim().min(1).optional(),
+              description: optionalMutationText,
+              preparationNotes: optionalMutationText,
+              location: optionalMutationText,
+              joinUrl: manualJoinUrl.optional(),
+              status: z.enum(['PENDING', 'CONFIRMED', 'REJECTED', 'CANCELLED']).optional(),
+              attendeeChanges: team.optional(),
+            })
+            .strict();
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    const fields: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      if (issue.code === 'unrecognized_keys')
+        for (const key of issue.keys) fields[key] = 'ไม่สามารถแก้ไขฟิลด์นี้';
+      else fields[String(issue.path[0] ?? 'body')] = 'ข้อมูลไม่ถูกต้อง';
+    }
+    throw new ApiError(400, 'VALIDATION_ERROR', fields);
+  }
+  return parsed.data as ParsedMeetingMutation;
+}
+
+function normalizeMeetingMutation(
+  input: ParsedMeetingMutation,
+  operation: MeetingMutationOperation,
+  memberId: string,
+) {
+  if (operation === 'cancel') input.status = 'CANCELLED';
+  if (operation === 'team') {
+    input.attendeeChanges = {
+      addMemberIds: input.addMemberIds!,
+      removeEmails: input.removeEmails!,
+    };
+    delete input.addMemberIds;
+    delete input.removeEmails;
+  }
+  if (input.attendeeChanges) {
+    input.attendeeChanges.addMemberIds = [...new Set(input.attendeeChanges.addMemberIds)].filter(
+      (id) => id !== memberId.toLowerCase(),
+    );
+    input.attendeeChanges.removeEmails = [...new Set(input.attendeeChanges.removeEmails)];
+  }
+}
+
 export class MeetingService {
   private mutationLocks = new Map<string, Promise<void>>();
   private async serializedMutation<T>(
@@ -403,7 +480,7 @@ export class MeetingService {
     user: UserView,
     meetingId: unknown,
     body: unknown,
-    operation: 'edit' | 'team' | 'cancel' = 'edit',
+    operation: MeetingMutationOperation = 'edit',
   ) {
     return this.serializedMutation(user, meetingId, () =>
       this.performEditMeeting(user, meetingId, body, operation),
@@ -413,71 +490,12 @@ export class MeetingService {
     user: UserView,
     meetingId: unknown,
     body: unknown,
-    operation: 'edit' | 'team' | 'cancel' = 'edit',
+    operation: MeetingMutationOperation = 'edit',
   ) {
     if (!user.id || user.membership !== 'member') throw new ApiError(404, 'MEETING_NOT_FOUND');
     if (!z.uuid().safeParse(meetingId).success) throw new ApiError(400, 'VALIDATION_ERROR');
-    const version = instant.regex(/Z$/).refine((value) => !/\.\d{7}/.test(value));
-    const team = z
-      .object({
-        addMemberIds: z.array(z.uuid().transform((v) => v.toLowerCase())),
-        removeEmails: z.array(z.string().trim().toLowerCase().pipe(z.email())),
-      })
-      .strict();
-    const optionalMutationText = z
-      .string()
-      .nullable()
-      .transform((v) => (v?.trim() ? v : null))
-      .optional();
-    const base = z.object({ expectedUpdatedAt: version });
-    const schema =
-      operation === 'cancel'
-        ? base.strict()
-        : operation === 'team'
-          ? base.extend(team.shape).strict()
-          : base
-              .extend({
-                title: z.string().trim().min(1).optional(),
-                candidateName: z.string().trim().min(1).optional(),
-                candidateEmail: z.string().trim().toLowerCase().pipe(z.email()).optional(),
-                position: z.string().trim().min(1).optional(),
-                description: optionalMutationText,
-                preparationNotes: optionalMutationText,
-                location: optionalMutationText,
-                joinUrl: manualJoinUrl.optional(),
-                status: z.enum(['PENDING', 'CONFIRMED', 'REJECTED', 'CANCELLED']).optional(),
-                attendeeChanges: team.optional(),
-              })
-              .strict();
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
-      const fields: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
-        if (issue.code === 'unrecognized_keys')
-          for (const key of issue.keys) fields[key] = 'ไม่สามารถแก้ไขฟิลด์นี้';
-        else fields[String(issue.path[0] ?? 'body')] = 'ข้อมูลไม่ถูกต้อง';
-      }
-      throw new ApiError(400, 'VALIDATION_ERROR', fields);
-    }
-    const input = parsed.data as import('../models/meeting.model.js').MeetingMutation & {
-      addMemberIds?: string[];
-      removeEmails?: string[];
-    };
-    if (operation === 'cancel') input.status = 'CANCELLED';
-    if (operation === 'team') {
-      input.attendeeChanges = {
-        addMemberIds: input.addMemberIds!,
-        removeEmails: input.removeEmails!,
-      };
-      delete input.addMemberIds;
-      delete input.removeEmails;
-    }
-    if (input.attendeeChanges) {
-      input.attendeeChanges.addMemberIds = [...new Set(input.attendeeChanges.addMemberIds)].filter(
-        (id) => id !== user.id!.toLowerCase(),
-      );
-      input.attendeeChanges.removeEmails = [...new Set(input.attendeeChanges.removeEmails)];
-    }
+    const input = parseMeetingMutation(body, operation);
+    normalizeMeetingMutation(input, operation, user.id);
     if (input.joinUrl !== undefined) {
       const current = await this.model.findById(user.id, meetingId as string);
       if (!current) throw new ApiError(404, 'MEETING_NOT_FOUND');
@@ -487,7 +505,8 @@ export class MeetingService {
         });
       }
     }
-    return { meeting: await this.model.mutate(user.id, meetingId as string, input) };
+    const meeting = await this.model.mutate(user.id, meetingId as string, input);
+    return { meeting };
   }
 
   async saveMeeting(user: UserView, body: unknown) {
