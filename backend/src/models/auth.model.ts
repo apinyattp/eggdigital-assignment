@@ -6,21 +6,19 @@ export type Member = {
   display_name: string;
   password_hash: string | null;
 };
+export type PrincipalLookup = {
+  member: Pick<Member, 'id' | 'email' | 'display_name'> | null;
+  candidateDenied: boolean;
+};
 export class AuthModel {
   constructor(private pool: Pool) {}
   async findByEmail(email: string): Promise<Member | null> {
-    return this.find('email', email);
-  }
-  async findById(id: string): Promise<Member | null> {
-    return this.find('id', id);
-  }
-  private async find(column: 'id' | 'email', value: string): Promise<Member | null> {
     try {
       return (
         (
           await this.pool.query<Member>(
-            `SELECT id,email,display_name,password_hash FROM users WHERE ${column} = $1`,
-            [value],
+            'SELECT id,email,display_name,password_hash FROM users WHERE email = $1',
+            [email],
           )
         ).rows[0] ?? null
       );
@@ -28,14 +26,34 @@ export class AuthModel {
       throw unavailable();
     }
   }
-  async checkCandidate(email: string): Promise<boolean> {
+  async findPrincipal(column: 'id' | 'email', value: string): Promise<PrincipalLookup> {
     try {
-      return (
-        await this.pool.query<{ denied: boolean }>(
-          'SELECT EXISTS (SELECT 1 FROM meetings WHERE candidate_email = $1) AS denied',
-          [email],
-        )
-      ).rows[0]!.denied;
+      // Keep a row for a Google candidate whose email has no registered member.
+      const { rows } = await this.pool.query<{
+        id: string | null;
+        email: string | null;
+        display_name: string | null;
+        denied: boolean;
+      }>(
+        `SELECT member.id,member.email,member.display_name,
+          EXISTS (SELECT 1 FROM meetings
+            WHERE candidate_email = ${column === 'id' ? 'member.email' : '$1'}) AS denied
+         FROM (SELECT 1) AS principal
+         LEFT JOIN users AS member ON member.${column} = $1`,
+        [value],
+      );
+      const row = rows[0]!;
+      return {
+        member:
+          row.id === null
+            ? null
+            : {
+                id: row.id,
+                email: row.email!,
+                display_name: row.display_name!,
+              },
+        candidateDenied: row.denied,
+      };
     } catch {
       throw unavailable();
     }

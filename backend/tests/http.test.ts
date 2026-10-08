@@ -57,7 +57,7 @@ describe('LOGIN r3 legacy retirement and retained L4/L5', () => {
       expect(r.body.error.code).toBe('NOT_FOUND');
       expect(r.headers['set-cookie']).toBeUndefined();
       expect(h.model.findByEmail).not.toHaveBeenCalled();
-      expect(h.model.findById).not.toHaveBeenCalled();
+      expect(h.model.findPrincipal).not.toHaveBeenCalled();
       expect(h.google.exchange).not.toHaveBeenCalled();
       expect(h.google.verifyIdToken).not.toHaveBeenCalled();
       expect(h.google.authorizationUrl).not.toHaveBeenCalled();
@@ -152,7 +152,7 @@ describe('LOGIN r3 legacy retirement and retained L4/L5', () => {
         .status,
     ).toBe(401);
     const login = await issue({ method: 'password', email: 'sample01@example.test', password });
-    h.model.findById.mockRejectedValue(new ApiError(503, 'DEPENDENCY_UNAVAILABLE'));
+    h.model.findPrincipal.mockRejectedValue(new ApiError(503, 'DEPENDENCY_UNAVAILABLE'));
     const r = await request(h.app).get('/api/v1/auth/session').set('Cookie', access(login));
     expect(r.status).toBe(503);
     expect(r.body.error.code).toBe('DEPENDENCY_UNAVAILABLE');
@@ -219,15 +219,16 @@ describe('LOGIN r3 legacy retirement and retained L4/L5', () => {
   it('TEST-MM-026/055 logout needs no DB/token and does not revoke other or copied JWTs', async () => {
     const a = await issue({ method: 'password', email: 'sample01@example.test', password });
     const b = await issue({ method: 'password', email: 'sample01@example.test', password });
-    const calls = h.model.findById.mock.calls.length;
-    h.model.findById.mockRejectedValueOnce(new ApiError(503, 'DEPENDENCY_UNAVAILABLE'));
+    const calls = h.model.findPrincipal.mock.calls.length;
+    h.model.findPrincipal.mockRejectedValueOnce(new ApiError(503, 'DEPENDENCY_UNAVAILABLE'));
     const r = await post('/logout').set('Cookie', 'mm_access=invalid').send({});
     expect(r.status).toBe(204);
-    expect(h.model.findById.mock.calls.length).toBe(calls);
+    expect(h.model.findPrincipal.mock.calls.length).toBe(calls);
     expect(cookie(r, 'mm_access')).toBe('mm_access=');
-    h.model.findById
-      .mockReset()
-      .mockImplementation(async () => h.members.get('sample01@example.test')!);
+    h.model.findPrincipal.mockReset().mockImplementation(async () => ({
+      member: h.members.get('sample01@example.test')!,
+      candidateDenied: false,
+    }));
     for (const x of [a, b])
       expect(
         (await request(h.app).get('/api/v1/auth/session').set('Cookie', access(x))).status,

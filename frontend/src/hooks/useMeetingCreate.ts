@@ -52,7 +52,7 @@ function currentMemberId() {
     : null;
 }
 
-export function useOnsiteCreate(
+export function useMeetingCreate(
   api: Pick<typeof meetingsApi, "create" | "read"> = meetingsApi,
 ) {
   const auth = useAuth();
