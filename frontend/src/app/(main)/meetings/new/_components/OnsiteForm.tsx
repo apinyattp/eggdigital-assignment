@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceLoading } from "@/app/(main)/_components/WorkspaceLoading";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SaveToast } from "@/components/ui/SaveToast";
@@ -57,7 +58,7 @@ export function OnsiteForm() {
   if (!auth.checked || auth.status === "checking")
     return (
       <main className={styles.shell}>
-        <p role="status">Checking your account…</p>
+        <WorkspaceLoading message="Checking your account…" />
       </main>
     );
   if (session?.user.membership !== "member")
