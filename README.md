@@ -3,7 +3,7 @@
 ## URL
 | Method | Path
 |---|---|
-| Frontend | [https://frontend-production-1564.up.railway.app/login](https://backend-production-9356.up.railway.app/api/v1/)
+| Frontend | [https://frontend-production-1564.up.railway.app](https://frontend-production-1564.up.railway.app)
 | Backend | [https://backend-production-9356.up.railway.app/](https://backend-production-9356.up.railway.app/api/v1)
 
 ## Application flow overview
