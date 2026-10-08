@@ -85,9 +85,16 @@ describe("approved common Member navigation", () => {
     await events.click(screen.getByRole("button", { name: "Logout" }));
     expect(onLogout).toHaveBeenCalledOnce();
   });
-  it.each(["button", "span", "svg"])(
-    "keeps the account menu open through an inside touch blur on %s",
-    async (target) => {
+  it.each([
+    ["button", "pointerdown"],
+    ["span", "pointerdown"],
+    ["svg", "pointerdown"],
+    ["button", "pointerup"],
+    ["span", "pointerup"],
+    ["svg", "pointerup"],
+  ])(
+    "keeps the account menu open through an inside touch blur on %s after %s",
+    async (target, blurAfter) => {
       const events = userEvent.setup();
       const onLogout = vi.fn();
       render(
@@ -101,13 +108,58 @@ describe("approved common Member navigation", () => {
       const touched =
         target === "button" ? button : button.querySelector(target)!;
       fireEvent.pointerDown(touched, { pointerType: "touch" });
+      if (blurAfter === "pointerup")
+        fireEvent.pointerUp(touched, { pointerType: "touch" });
       fireEvent.blur(button, { relatedTarget: null });
       expect(toggle).toHaveAttribute("aria-expanded", "true");
-      fireEvent.pointerUp(touched, { pointerType: "touch" });
+      if (blurAfter === "pointerdown")
+        fireEvent.pointerUp(touched, { pointerType: "touch" });
       fireEvent.click(touched);
       expect(onLogout).toHaveBeenCalledOnce();
     },
   );
+  it.each(["click", "cancel", "keyboard", "outside release", "window blur"])(
+    "clears the touch guard after %s so focus can leave the account menu",
+    async (completion) => {
+      const events = userEvent.setup();
+      const onLogout = vi.fn();
+      render(
+        <WorkspaceShell user={user} onLogout={onLogout}>
+          <button>Outside</button>
+        </WorkspaceShell>,
+      );
+      const toggle = screen.getByRole("button", { name: "Account" });
+      await events.click(toggle);
+      const button = screen.getByRole("button", { name: "Logout" });
+      fireEvent.pointerDown(button, { pointerType: "touch" });
+      fireEvent.pointerUp(button, { pointerType: "touch" });
+      if (completion === "click") fireEvent.click(button);
+      if (completion === "cancel") fireEvent.pointerCancel(button);
+      if (completion === "keyboard") fireEvent.keyDown(button, { key: "Tab" });
+      if (completion === "outside release")
+        fireEvent.pointerUp(screen.getByRole("button", { name: "Outside" }));
+      if (completion === "window blur") fireEvent.blur(window);
+      fireEvent.blur(button, { relatedTarget: null });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(onLogout).toHaveBeenCalledTimes(completion === "click" ? 1 : 0);
+    },
+  );
+  it("dismisses when focus moves to a known outside target during a touch", async () => {
+    const events = userEvent.setup();
+    render(
+      <WorkspaceShell user={user} onLogout={vi.fn()}>
+        <button>Outside</button>
+      </WorkspaceShell>,
+    );
+    const toggle = screen.getByRole("button", { name: "Account" });
+    await events.click(toggle);
+    const button = screen.getByRole("button", { name: "Logout" });
+    fireEvent.pointerDown(button, { pointerType: "touch" });
+    fireEvent.blur(button, {
+      relatedTarget: screen.getByRole("button", { name: "Outside" }),
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
   it("still dismisses on outside pointers, Tab, Escape and blur without a pointer", async () => {
     const events = userEvent.setup();
     render(

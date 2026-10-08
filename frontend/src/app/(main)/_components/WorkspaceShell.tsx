@@ -64,14 +64,26 @@ export function WorkspaceShell({
     const releasePointer = () => {
       accountPointerActive.current = false;
     };
+    const releaseOutside = (event: PointerEvent) => {
+      if (!account.current?.contains(event.target as Node)) {
+        releasePointer();
+        if (menu === "account") setMenu(null);
+      }
+    };
     document.addEventListener("pointerdown", outside, true);
-    document.addEventListener("pointerup", releasePointer);
+    document.addEventListener("pointerup", releaseOutside);
+    document.addEventListener("click", releasePointer);
     document.addEventListener("pointercancel", releasePointer);
+    document.addEventListener("keydown", releasePointer, true);
+    window.addEventListener("blur", releasePointer);
     return () => {
       releasePointer();
       document.removeEventListener("pointerdown", outside, true);
-      document.removeEventListener("pointerup", releasePointer);
+      document.removeEventListener("pointerup", releaseOutside);
+      document.removeEventListener("click", releasePointer);
       document.removeEventListener("pointercancel", releasePointer);
+      document.removeEventListener("keydown", releasePointer, true);
+      window.removeEventListener("blur", releasePointer);
     };
   }, [menu]);
 
@@ -141,7 +153,7 @@ export function WorkspaceShell({
           className={styles.account}
           onBlur={(event) => {
             // A touch can blur without a new focus target before click fires.
-            // Keep the menu mounted until that inside pointer finishes.
+            // Keep the menu mounted through pointerup until its click fires.
             if (!event.relatedTarget && accountPointerActive.current) return;
             if (
               !event.currentTarget.contains(event.relatedTarget as Node | null)

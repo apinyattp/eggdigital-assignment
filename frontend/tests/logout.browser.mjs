@@ -25,6 +25,7 @@ try {
     "icon",
     "background",
     "blur-before-click",
+    "blur-after-pointerup",
     "retry",
   ]) {
     const context = await browser.newContext({
@@ -110,6 +111,10 @@ try {
       throw new Error(`Unexpected local route ${path}`);
     });
     await page.goto(`${origin}/dashboard`, { waitUntil: "domcontentloaded" });
+    // Wait for the client session before interacting with the hydrated shell.
+    await page
+      .getByText("Synthetic Owner", { exact: true })
+      .waitFor({ state: "attached" });
     await page.getByRole("button", { name: "Account", exact: true }).tap();
     const logout = page
       .locator("header")
@@ -117,14 +122,21 @@ try {
     await logout.waitFor({ state: "visible" });
     if (target === "text") await logout.locator("span").tap();
     else if (target === "icon") await logout.locator("svg").tap();
-    else if (target === "blur-before-click") {
+    else if (
+      target === "blur-before-click" ||
+      target === "blur-after-pointerup"
+    ) {
       // Reproduce the problematic ordering explicitly, without claiming this
       // forced event sequence occurs on every Safari version.
-      await logout.evaluate((button) => {
-        button.addEventListener("pointerdown", () => button.blur(), {
-          once: true,
-        });
-      });
+      await logout.evaluate(
+        (button, eventName) => {
+          // Run after document handlers so pointerup cleanup has completed.
+          window.addEventListener(eventName, () => button.blur(), {
+            once: true,
+          });
+        },
+        target === "blur-before-click" ? "pointerdown" : "pointerup",
+      );
       await logout.tap();
     } else await logout.tap({ position: { x: 4, y: 4 } });
     if (target === "retry") {
@@ -134,7 +146,9 @@ try {
         await page.getByText("Synthetic Owner", { exact: true }).count(),
         0,
       );
-      await logout.tap();
+      // The open account popover overlaps the retry panel at this viewport.
+      await page.locator("header img").tap();
+      await page.getByRole("button", { name: "Retry sign-out" }).tap();
     }
     await page.waitForURL(`${origin}/login`, { waitUntil: "domcontentloaded" });
     assert.deepEqual(
