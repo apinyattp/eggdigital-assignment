@@ -11,21 +11,20 @@ export type UserView = {
 };
 export class AuthService {
   constructor(
-    private model: Pick<AuthModel, 'findByEmail' | 'findById' | 'checkCandidate'>,
+    private model: Pick<AuthModel, 'findByEmail' | 'findPrincipal'>,
     private tokens: TokenService,
     private google: Pick<GoogleIdentityService, 'exchange' | 'verifyIdToken'>,
     private dummyHash: string,
   ) {}
   async findPrincipal(identity: Identity, missingMemberStatus: 401 | 404 = 401): Promise<UserView> {
-    const member =
+    const { member, candidateDenied } =
       identity.authMethod === 'password'
-        ? await this.model.findById(identity.subject)
-        : await this.model.findByEmail(identity.verifiedEmail!);
+        ? await this.model.findPrincipal('id', identity.subject)
+        : await this.model.findPrincipal('email', identity.verifiedEmail!);
     if (identity.authMethod === 'password' && !member) {
       throw new ApiError(401, 'UNAUTHENTICATED');
     }
-    const email = identity.authMethod === 'password' ? member!.email : identity.verifiedEmail!;
-    if (await this.model.checkCandidate(email)) {
+    if (candidateDenied) {
       throw new ApiError(403, 'CANDIDATE_DENIED');
     }
     if (!member) {
