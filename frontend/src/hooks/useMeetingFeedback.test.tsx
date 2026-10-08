@@ -98,6 +98,31 @@ beforeEach(() => {
   mock.refresh.mockClear();
 });
 describe("F1/F2/F3 state — AC024/025/038, mocked API/auth", () => {
+  it("keeps the presentation model stable across parent renders and updates it for edits and identity checks", async () => {
+    const service = api();
+    const { result, rerender } = renderHook(() =>
+      useMeetingFeedback("meeting", service),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    const ready = result.current;
+    for (let tick = 0; tick < 10; tick++) {
+      rerender();
+      expect(result.current).toBe(ready);
+    }
+    act(() => ready.open());
+    expect(result.current).not.toBe(ready);
+    expect(result.current.editor?.phase).toBe("editing");
+    act(() => result.current.change("New feedback"));
+    expect(result.current.editor?.draft).toBe("New feedback");
+    act(() => emit({ ...identity(), status: "checking", session: null }));
+    expect(result.current.visible).toBe(false);
+    expect(result.current.items).toEqual([]);
+    expect(result.current.canAdd).toBe(false);
+    act(() => emit(identity()));
+    expect(result.current.items).toEqual([other]);
+    expect(result.current.editor?.draft).toBe("New feedback");
+    expect(service.readFeedback).toHaveBeenCalledOnce();
+  });
   it("blocks Add from authoritative ownFeedbackId outside latest50 and permits loading own old entry", async () => {
     const service = api();
     service.readFeedback

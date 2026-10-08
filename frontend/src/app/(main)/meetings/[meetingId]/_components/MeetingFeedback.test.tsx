@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { useMeetingFeedback } from "@/hooks/useMeetingFeedback";
 import { MeetingFeedback } from "./MeetingFeedback";
 const own = {
@@ -41,7 +41,58 @@ function model(): ReturnType<typeof useMeetingFeedback> {
     resolve: vi.fn(),
   };
 }
+afterEach(() => vi.restoreAllMocks());
 describe("meeting Feedback page-local UI", () => {
+  it("skips unchanged panel renders and formats each loaded timestamp once until it changes", () => {
+    const feedback = model();
+    feedback.items = Array.from({ length: 50 }, (_, index) => ({
+      ...own,
+      id: String(index),
+      isOwn: index === 0,
+    }));
+    const inspectItems = vi.spyOn(feedback.items, "find");
+    const format = vi.spyOn(Date.prototype, "toLocaleString");
+    const { container, rerender } = render(
+      <MeetingFeedback feedback={feedback} authorName="Owner" />,
+    );
+    expect(format).toHaveBeenCalledTimes(50);
+    inspectItems.mockClear();
+    for (let tick = 0; tick < 10; tick++) {
+      rerender(<MeetingFeedback feedback={feedback} authorName="Owner" />);
+    }
+    expect(inspectItems).not.toHaveBeenCalled();
+    expect(format).toHaveBeenCalledTimes(50);
+
+    // A real panel state change must update controls without reformatting dates.
+    rerender(
+      <MeetingFeedback
+        feedback={{ ...feedback, loading: "older" }}
+        authorName="Owner"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Edit Feedback" })).toBeDisabled();
+    expect(format).toHaveBeenCalledTimes(50);
+    const updatedAt = "2026-10-09T18:01:00.000123Z";
+    const changed = {
+      ...feedback,
+      items: feedback.items.map((item, index) =>
+        index === 0
+          ? { ...item, text: "Updated feedback", updatedAt }
+          : { ...item },
+      ),
+    };
+    rerender(<MeetingFeedback feedback={changed} authorName="Owner" />);
+    expect(format).toHaveBeenCalledTimes(51);
+    expect(screen.getByText("Updated feedback")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit Feedback" })).toBeEnabled();
+    const time = container.querySelector("time")!;
+    expect(time).toHaveAttribute("datetime", updatedAt);
+    expect(time).toHaveTextContent("10 Oct 2026, 01:01");
+    expect(time).toHaveAttribute(
+      "aria-label",
+      "Latest update 10 Oct 2026, 01:01 Bangkok UTC+7",
+    );
+  });
   it("shows one latest timestamp per row and edits only server-marked own rows, not matching names", () => {
     const feedback = model();
     feedback.items = [

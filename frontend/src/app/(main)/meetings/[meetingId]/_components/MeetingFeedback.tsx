@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SaveToast } from "@/components/ui/SaveToast";
 import type { useMeetingFeedback } from "@/hooks/useMeetingFeedback";
 import styles from "../meeting-detail.module.css";
@@ -14,7 +14,7 @@ const formatFeedbackUpdateTime = (value: string) =>
     minute: "2-digit",
     hourCycle: "h23",
   });
-export function MeetingFeedback({
+export const MeetingFeedback = memo(function MeetingFeedback({
   feedback,
   authorName,
 }: {
@@ -149,12 +149,7 @@ export function MeetingFeedback({
           >
             <div className={styles.entryBody}>
               <h4>
-                <time
-                  dateTime={item.updatedAt}
-                  aria-label={`Latest update ${formatFeedbackUpdateTime(item.updatedAt)} Bangkok UTC+7`}
-                >
-                  {formatFeedbackUpdateTime(item.updatedAt)}
-                </time>
+                <FeedbackTimestamp updatedAt={item.updatedAt} />
               </h4>
               <p className={styles.text}>{item.text}</p>
               <p className={styles.help}>
@@ -252,6 +247,20 @@ export function MeetingFeedback({
         />
       )}
     </section>
+  );
+});
+function FeedbackTimestamp({ updatedAt }: { updatedAt: string }) {
+  const formatted = useMemo(
+    () => formatFeedbackUpdateTime(updatedAt),
+    [updatedAt],
+  );
+  return (
+    <time
+      dateTime={updatedAt}
+      aria-label={`Latest update ${formatted} Bangkok UTC+7`}
+    >
+      {formatted}
+    </time>
   );
 }
 function FeedbackEditor({
