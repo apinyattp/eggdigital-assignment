@@ -82,6 +82,35 @@ describe('Google login requires an existing Member before JWT issuance', () => {
     });
   });
 });
+describe('current-principal lookup', () => {
+  it.each(['password', 'google'] as const)(
+    'uses one narrow lookup for each %s session read',
+    async (authMethod) => {
+      const h = await harness();
+      const identity =
+        authMethod === 'password'
+          ? { authMethod, subject: memberId }
+          : { authMethod, subject: 'google:controlled', verifiedEmail: 'sample01@example.test' };
+      const { token } = await h.tokens.issue(identity);
+      for (let read = 1; read <= 2; read++) {
+        await expect(h.auth.findSession(token)).resolves.toHaveProperty('user.id', memberId);
+        expect(h.model.findPrincipal).toHaveBeenCalledTimes(read);
+      }
+      expect(h.model.findPrincipal).toHaveBeenLastCalledWith(
+        authMethod === 'password' ? 'id' : 'email',
+        authMethod === 'password' ? memberId : 'sample01@example.test',
+      );
+      expect(h.model.findByEmail).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps missing password membership unauthorized even when a candidate flag is returned', async () => {
+    const h = await harness();
+    h.model.findPrincipal.mockResolvedValue({ member: null, candidateDenied: true });
+    await expect(
+      h.auth.findPrincipal({ authMethod: 'password', subject: memberId }, 404),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+  });
+});
 describe('TEST-MM-053/055 JWT verification', () => {
   const clock = () => 1_791_370_000_000;
   const tokens = new TokenService(config, clock);
