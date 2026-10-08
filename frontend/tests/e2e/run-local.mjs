@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -471,6 +472,30 @@ try {
         failedSuites.push(`${browser} ${suite}`);
         process.stdout.write(
           `FAILED ${browser} ${suite}; collecting remaining suites\n`,
+        );
+      }
+      // Only the helper's already-redacted report is public; private child logs stay local.
+      try {
+        const report = JSON.parse(
+          await readFile(
+            path.join(
+              evidence,
+              browser,
+              suite.replace(".browser.mjs", ""),
+              "results.json",
+            ),
+            "utf8",
+          ),
+        );
+        for (const result of report.results)
+          process.stdout.write(JSON.stringify(result) + "\n");
+        if (report.initializationError)
+          process.stdout.write(
+            JSON.stringify(report.initializationError) + "\n",
+          );
+      } catch {
+        process.stdout.write(
+          `No safe scenario report was produced for ${browser} ${suite}\n`,
         );
       }
     }

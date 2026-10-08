@@ -58,6 +58,13 @@ await runSuite("meetings", async ({ run }) => {
         10,
       ),
     );
+    const renderedIds = () =>
+      upcoming
+        .getByRole("link", { name: /^View .* meeting$/ })
+        .evaluateAll((links) =>
+          links.map((link) => new URL(link.href).pathname.split("/").pop()),
+        );
+    assert.deepEqual(await renderedIds(), fixture.listMeetingIds.slice(0, 10));
     const secondPage = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return (
@@ -78,6 +85,13 @@ await runSuite("meetings", async ({ run }) => {
         await upcoming.getByRole("link", { name: /^View .* meeting$/ }).count(),
         12,
       ),
+    );
+    const completeIds = await renderedIds();
+    assert.deepEqual(completeIds, fixture.listMeetingIds);
+    assert.equal(new Set(completeIds).size, fixture.listMeetingIds.length);
+    assert.deepEqual(
+      payload.group.items.map((item) => item.id),
+      fixture.listMeetingIds.slice(10),
     );
     assert.equal(
       await upcoming
@@ -121,6 +135,22 @@ await runSuite("meetings", async ({ run }) => {
         40,
       ),
     );
+    await page.getByRole("button", { name: "Load more members" }).click();
+    await check(async () =>
+      assert.equal(
+        await page.getByRole("listbox").getByRole("option").count(),
+        55,
+      ),
+    );
+    assert.equal(
+      await page.getByRole("button", { name: "Load more members" }).count(),
+      0,
+    );
+    const memberOptions = await page
+      .getByRole("listbox")
+      .getByRole("option")
+      .allTextContents();
+    assert.equal(new Set(memberOptions).size, 55);
     await search.fill(fixture.accounts.attendee.email);
     const option = page
       .getByRole("option")

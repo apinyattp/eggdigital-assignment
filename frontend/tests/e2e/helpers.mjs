@@ -45,14 +45,37 @@ export async function runSuite(suite, execute) {
   assert.ok(["127.0.0.1", "localhost"].includes(new URL(origin).hostname));
   const engine = process.env.PLAYWRIGHT_BROWSER ?? "chromium";
   assert.ok(["chromium", "webkit"].includes(engine));
-  const browser = await { chromium, webkit }[engine].launch({
-    headless: process.env.E2E_HEADED !== "1" && !process.env.PWDEBUG,
-    ...(engine === "chromium" && process.env.PLAYWRIGHT_EXECUTABLE_PATH
-      ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH }
-      : {}),
-  });
   const directory = path.join(process.env.E2E_EVIDENCE_DIR, engine, suite);
   await fs.mkdir(directory, { recursive: true });
+  let browser;
+  try {
+    browser = await { chromium, webkit }[engine].launch({
+      headless: process.env.E2E_HEADED !== "1" && !process.env.PWDEBUG,
+      ...(engine === "chromium" && process.env.PLAYWRIGHT_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH }
+        : {}),
+    });
+  } catch (error) {
+    const initializationError = {
+      stage: "browser-launch",
+      name: error instanceof Error ? error.name : "UnknownError",
+      sourceLine:
+        error instanceof Error
+          ? (error.stack?.match(/helpers\.mjs:(\d+):\d+/)?.[1] ?? null)
+          : null,
+    };
+    await fs.writeFile(
+      path.join(directory, "results.json"),
+      JSON.stringify(
+        { suite, engine, results: [], initializationError },
+        null,
+        2,
+      ),
+    );
+    throw new Error(
+      "Browser initialization failed; see safe results.json classification",
+    );
+  }
   const results = [];
   const collectTraces = process.env.E2E_TRACE === "1" && !process.env.CI;
   const selectedCase = process.env.E2E_CASE;
