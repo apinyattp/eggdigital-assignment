@@ -1,8 +1,9 @@
-import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { MeetingModel } from '../models/meeting.model.js';
 import type { UserView } from './auth.service.js';
 import { ApiError } from '../utils/api-error.js';
+import { signSnapshot, verifySnapshot } from '../utils/signed-snapshot.js';
 const optionalText = z
   .string()
   .nullable()
@@ -118,7 +119,11 @@ export class MeetingService {
           .regex(/^[1-9]\d*$/)
           .transform(Number)
           .pipe(z.number().int().positive().safe()),
-        pageSize: z.literal('10').transform(Number),
+        pageSize: z
+          .string()
+          .regex(/^[1-9]\d*$/)
+          .transform(Number)
+          .pipe(z.number().int().positive().max(10)),
         snapshot: z.unknown().optional(),
       })
       .strict()
@@ -135,7 +140,7 @@ export class MeetingService {
         kind: z.literal('meetingList'),
         date: z.iso.date(),
         principal: z.string(),
-        pageSize: z.literal(10),
+        pageSize: z.number().int().positive().max(10),
         referenceTime: instant.regex(/Z$/),
         fingerprint: z.string(),
       })
@@ -143,22 +148,7 @@ export class MeetingService {
     let previous: z.infer<typeof schema> | undefined;
     if (input.data.snapshot !== undefined) {
       try {
-        const token = z.string().min(1).max(4096).parse(input.data.snapshot);
-        const [payload, signature, ...extra] = token.split('.');
-        if (
-          !payload ||
-          !signature ||
-          extra.length ||
-          !/^[A-Za-z0-9_-]+$/.test(payload) ||
-          !/^[A-Za-z0-9_-]+$/.test(signature) ||
-          Buffer.from(signature, 'base64url').toString('base64url') !== signature
-        )
-          throw new Error();
-        const supplied = Buffer.from(signature, 'base64url');
-        const expected = createHmac('sha256', this.cursorKey).update(payload).digest();
-        if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
-          throw new Error();
-        previous = schema.parse(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
+        previous = schema.parse(verifySnapshot(input.data.snapshot, this.cursorKey));
         if (
           previous.date !== date ||
           previous.principal !== principal ||
@@ -179,25 +169,29 @@ export class MeetingService {
     );
     if (previous && previous.fingerprint !== result.fingerprint)
       throw new ApiError(409, 'LIST_CHANGED');
-    const payload = Buffer.from(
-      JSON.stringify({
+    const snapshot = signSnapshot(
+      {
         kind: 'meetingList',
         date,
         principal,
         pageSize,
         referenceTime: result.referenceTime,
         fingerprint: result.fingerprint,
-      }),
-    ).toString('base64url');
-    const snapshot =
-      payload + '.' + createHmac('sha256', this.cursorKey).update(payload).digest('base64url');
+      },
+      this.cursorKey,
+    );
     const header = {
       date,
       timeZone: 'Asia/Bangkok',
       referenceTime: result.referenceTime,
       snapshot,
     };
-    const group = { ...result.groups.upcomingCurrent, page, pageSize };
+    const group = {
+      ...result.groups.upcomingCurrent,
+      page,
+      pageSize,
+      totalPages: Math.ceil(result.groups.upcomingCurrent.total / pageSize),
+    };
     if (section) return { ...header, section, group };
     return {
       ...header,
@@ -259,7 +253,11 @@ export class MeetingService {
           .regex(/^[1-9]\d*$/)
           .transform(Number)
           .pipe(z.number().int().positive().safe()),
-        pageSize: z.literal('50').transform(Number),
+        pageSize: z
+          .string()
+          .regex(/^[1-9]\d*$/)
+          .transform(Number)
+          .pipe(z.number().int().positive().max(50)),
         snapshot: z.unknown().optional(),
       })
       .strict()
@@ -274,7 +272,7 @@ export class MeetingService {
         kind: z.literal('feedbackPage'),
         meetingId: z.uuid(),
         principal: z.string(),
-        pageSize: z.literal(50),
+        pageSize: z.number().int().positive().max(50),
         asOf: instant.regex(/Z$/),
         total: z.number().int().nonnegative().safe(),
       })
@@ -282,22 +280,7 @@ export class MeetingService {
     let previous: z.infer<typeof schema> | undefined;
     if (parsed.data.snapshot !== undefined) {
       try {
-        const token = z.string().min(1).max(4096).parse(parsed.data.snapshot);
-        const [payload, signature, ...extra] = token.split('.');
-        if (
-          !payload ||
-          !signature ||
-          extra.length ||
-          !/^[A-Za-z0-9_-]+$/.test(payload) ||
-          !/^[A-Za-z0-9_-]+$/.test(signature) ||
-          Buffer.from(signature, 'base64url').toString('base64url') !== signature
-        )
-          throw new Error();
-        const expected = createHmac('sha256', this.cursorKey).update(payload).digest();
-        const supplied = Buffer.from(signature, 'base64url');
-        if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
-          throw new Error();
-        previous = schema.parse(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
+        previous = schema.parse(verifySnapshot(parsed.data.snapshot, this.cursorKey));
         if (
           previous.meetingId !== meetingId ||
           previous.principal !== authorKey ||
@@ -317,24 +300,24 @@ export class MeetingService {
       previous?.asOf,
     );
     if (previous && result.total !== previous.total) throw new ApiError(409, 'LIST_CHANGED');
-    const payload = Buffer.from(
-      JSON.stringify({
+    const snapshot = signSnapshot(
+      {
         kind: 'feedbackPage',
         meetingId,
         principal: authorKey,
         pageSize,
         asOf: result.asOf,
         total: result.total,
-      }),
-    ).toString('base64url');
-    const snapshot =
-      payload + '.' + createHmac('sha256', this.cursorKey).update(payload).digest('base64url');
+      },
+      this.cursorKey,
+    );
     return {
       items: result.rows.reverse(),
       ownFeedbackId: result.ownFeedbackId,
       page,
       pageSize,
       total: result.total,
+      totalPages: Math.ceil(result.total / pageSize),
       asOf: result.asOf,
       snapshot,
     };
@@ -495,10 +478,14 @@ export class MeetingService {
       );
       input.attendeeChanges.removeEmails = [...new Set(input.attendeeChanges.removeEmails)];
     }
-    const current = await this.model.findById(user.id, meetingId as string);
-    if (input.joinUrl !== undefined && !current) throw new ApiError(404, 'MEETING_NOT_FOUND');
-    if (input.joinUrl !== undefined && current?.format !== 'ONLINE') {
-      throw new ApiError(400, 'VALIDATION_ERROR', { joinUrl: 'ใช้ลิงก์ได้เฉพาะการประชุมออนไลน์' });
+    if (input.joinUrl !== undefined) {
+      const current = await this.model.findById(user.id, meetingId as string);
+      if (!current) throw new ApiError(404, 'MEETING_NOT_FOUND');
+      if (current.format !== 'ONLINE') {
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          joinUrl: 'ใช้ลิงก์ได้เฉพาะการประชุมออนไลน์',
+        });
+      }
     }
     return { meeting: await this.model.mutate(user.id, meetingId as string, input) };
   }

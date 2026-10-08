@@ -115,14 +115,13 @@ export function createAuthController(
       status: "anonymous",
     });
     const task = (async () => {
-      let earlyFailure: unknown;
-      if (preceding)
-        await api.logout().catch((error: unknown) => {
-          earlyFailure = error;
-        });
-      if (preceding) await preceding.promise;
+      if (preceding) {
+        // Cancel promptly, then wait for any response that could restore cookies.
+        // Final cleanup repeats every logout step and must acknowledge them all.
+        await api.logout().catch(() => undefined);
+        await preceding.promise;
+      }
       await api.logout();
-      if (earlyFailure) throw earlyFailure;
       set({
         status: "anonymous",
         session: null,

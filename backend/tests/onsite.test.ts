@@ -67,6 +67,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 1,
       pageSize: 20,
       total: 0,
+      totalPages: 0,
     });
     expect(m.readPage).not.toHaveBeenCalled();
   });
@@ -85,6 +86,7 @@ describe('S1 TEST-MM-013/028 member page unit', () => {
       page: 2,
       pageSize: 20,
       total: 25,
+      totalPages: 2,
     });
     expect(m.readPage).toHaveBeenCalledWith('sample', 20, 20);
   });
@@ -517,8 +519,13 @@ describe('S1 TEST-MM-022/027/041 HTTP identity and envelope', () => {
     expect(h.memberModel.readPage).not.toHaveBeenCalled();
     const response = await get('page=2&pageSize=20');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0 });
+    expect(response.body).toEqual({ items: [], page: 2, pageSize: 20, total: 0, totalPages: 0 });
     expect(h.memberModel.readPage).toHaveBeenCalledWith('sample', 20, 20);
+    h.memberModel.readPage.mockResolvedValue({ items: [], total: 25 });
+    const smaller = await get('page=2&pageSize=5');
+    expect(smaller.status).toBe(200);
+    expect(smaller.body).toEqual({ items: [], page: 2, pageSize: 5, total: 25, totalPages: 5 });
+    expect(h.memberModel.readPage).toHaveBeenLastCalledWith('sample', 5, 5);
   });
   it('all routes check current Candidate before business service, including replay', async () => {
     const h = await harness(),
@@ -643,5 +650,84 @@ describe('Confirmed Add temporal and separate-field amendments', () => {
     await expect(
       meetingHarness().service.saveMeeting(user, { ...draft(), preparationNotes }),
     ).rejects.toMatchObject({ status: 400, fields: { preparationNotes: expect.any(String) } });
+  });
+});
+
+describe('meeting edit pre-read scope', () => {
+  it.each([
+    ['edit', { title: 'Changed' }],
+    ['team', { addMemberIds: [attendee], removeEmails: [] }],
+    ['cancel', {}],
+  ] as const)('delegates %s directly to the guarded mutation', async (operation, change) => {
+    const { model, service } = meetingHarness();
+    model.mutate.mockResolvedValue(stored);
+    expect(
+      await service.editMeeting(
+        user,
+        stored.id,
+        { expectedUpdatedAt: stored.updatedAt, ...change },
+        operation,
+      ),
+    ).toEqual({ meeting: stored });
+    expect(model.findById).not.toHaveBeenCalled();
+    expect(model.mutate).toHaveBeenCalledWith(
+      memberId,
+      stored.id,
+      expect.objectContaining({ expectedUpdatedAt: stored.updatedAt }),
+    );
+  });
+  it.each(['https://example.test/join'])(
+    'preserves online format prevalidation for joinUrl %s',
+    async (joinUrl) => {
+      const { model, service } = meetingHarness();
+      await expect(
+        service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(model.mutate).not.toHaveBeenCalled();
+      model.findById.mockResolvedValue(null);
+      await expect(
+        service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl }),
+      ).rejects.toMatchObject({ code: 'MEETING_NOT_FOUND', status: 404 });
+      model.findById.mockResolvedValue({ ...stored, format: 'ONLINE' } as never);
+      model.mutate.mockResolvedValue(stored);
+      await service.editMeeting(user, stored.id, { expectedUpdatedAt: stored.updatedAt, joinUrl });
+      expect(model.mutate).toHaveBeenCalledWith(memberId, stored.id, {
+        expectedUpdatedAt: stored.updatedAt,
+        joinUrl,
+      });
+    },
+  );
+  it('propagates guarded mutation authorization and stale-version failures without a pre-read', async () => {
+    const { model, service } = meetingHarness();
+    for (const code of ['MEETING_NOT_FOUND', 'MEETING_CHANGED']) {
+      const error = new Error(code);
+      model.mutate.mockRejectedValue(error);
+      await expect(
+        service.editMeeting(user, stored.id, {
+          expectedUpdatedAt: stored.updatedAt,
+          title: 'Changed',
+        }),
+      ).rejects.toBe(error);
+    }
+    expect(model.findById).not.toHaveBeenCalled();
+  });
+});
+
+describe('member page count metadata', () => {
+  it.each([0, 1, 25])('derives totalPages from the same SQL count for total %s', async (total) => {
+    const model = { readPage: vi.fn().mockResolvedValue({ items: [], total }) };
+    const service = new MemberService(model);
+    for (const size of [1, 5, 20]) {
+      for (const page of [1, 99]) {
+        expect(await service.searchMembers(' member ', page, size)).toEqual({
+          items: [],
+          total,
+          page,
+          pageSize: size,
+          totalPages: Math.ceil(total / size),
+        });
+        expect(model.readPage).toHaveBeenLastCalledWith('member', size, (page - 1) * size);
+      }
+    }
   });
 });

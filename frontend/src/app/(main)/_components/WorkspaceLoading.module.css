@@ -1,0 +1,41 @@
+.loading {
+  min-height: min(50vh, 360px);
+  display: grid;
+  place-items: center;
+  color: #5f5b66;
+  text-align: center;
+}
+.indicator {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  opacity: 0;
+  /* Reveal only sustained waits; never delay the route or its data. */
+  animation: reveal 0s 150ms forwards;
+}
+.indicator p {
+  margin: 0;
+}
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #efefeb;
+  border-top-color: #b68a00;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+@keyframes reveal {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

@@ -175,7 +175,13 @@ async function harness(viewport = { width: 1440, height: 1000 }) {
           referenceTime: new Date().toISOString(),
           snapshot: "auth-test-empty-list",
           groups: {
-            upcomingCurrent: { items: [], page: 1, pageSize: 10, total: 0 },
+            upcomingCurrent: {
+              items: [],
+              page: 1,
+              pageSize: 10,
+              total: 0,
+              totalPages: 0,
+            },
             rejectedCancelled: { count: 0, items: [] },
             past: { count: 0, items: [] },
           },

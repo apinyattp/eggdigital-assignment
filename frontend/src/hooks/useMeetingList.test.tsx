@@ -31,6 +31,7 @@ const initial = (): MeetingList => ({
       total: 11,
       page: 1,
       pageSize: 10,
+      totalPages: 2,
       items: [item("first")],
     },
     rejectedCancelled: { count: 12, items: [] },
@@ -43,7 +44,13 @@ const batch = (): MeetingListBatch => ({
   referenceTime: initial().referenceTime,
   snapshot: "snapshot",
   section: "upcomingCurrent",
-  group: { total: 11, page: 2, pageSize: 10, items: [item("second")] },
+  group: {
+    total: 11,
+    page: 2,
+    pageSize: 10,
+    totalPages: 2,
+    items: [item("second")],
+  },
 });
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -188,6 +195,7 @@ describe("R1 list date/account generations and continuation", () => {
       total: 1,
       page: 1,
       pageSize: 10,
+      totalPages: 1,
       items: [item("other-account")],
     };
     const api = {

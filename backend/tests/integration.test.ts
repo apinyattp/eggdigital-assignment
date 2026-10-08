@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, afterAll, describe, it, expect } from 'vitest';
+import { beforeAll, beforeEach, afterAll, describe, it, expect, vi } from 'vitest';
 import { Pool } from 'pg';
 import request from 'supertest';
 import argon2 from 'argon2';
@@ -244,6 +244,50 @@ describe('TEST-MM-008/009/025 real SQL password and current-principal checks', (
     expect(s.body).toEqual({ user: r.body.user, expiresAt: r.body.expiresAt });
     expect(Object.keys(r.body.user).sort()).toEqual(['displayName', 'email', 'id', 'membership']);
   });
+  it.each(['password', 'google'] as const)(
+    'reads a %s session in one SQL statement without selecting password hashes',
+    async (authMethod) => {
+      const identity =
+        authMethod === 'password'
+          ? { authMethod, subject: fixtureIds.member }
+          : { authMethod, subject: 'google:controlled', verifiedEmail: 'sample01@example.test' };
+      const { token } = await tokens.issue(identity);
+      const query = vi.spyOn(pool, 'query');
+      try {
+        const session = await auth.findSession(token);
+        expect(session.user.id).toBe(fixtureIds.member);
+        expect(query).toHaveBeenCalledTimes(1);
+        expect(query.mock.calls[0]![0]).not.toMatch(/password_hash|SELECT\s+\*/i);
+        expect(query.mock.results[0]!.type).toBe('return');
+        const result = await query.mock.results[0]!.value;
+        expect(Object.keys(result.rows[0]).sort()).toEqual([
+          'denied',
+          'display_name',
+          'email',
+          'id',
+        ]);
+      } finally {
+        query.mockRestore();
+      }
+    },
+  );
+  it('checks the current password member email after an email change, then rejects deletion', async () => {
+    const id = fixtureIds.googleOnly;
+    const { token } = await tokens.issue({ authMethod: 'password', subject: id });
+    expect((await auth.findSession(token)).user.email).toBe('google-only@example.test');
+    await pool.query("UPDATE users SET email='changed@example.test' WHERE id=$1", [id]);
+    expect((await auth.findSession(token)).user.email).toBe('changed@example.test');
+    await pool.query("UPDATE meetings SET candidate_email='changed@example.test'");
+    await expect(auth.findSession(token)).rejects.toMatchObject({
+      status: 403,
+      code: 'CANDIDATE_DENIED',
+    });
+    await pool.query('DELETE FROM users WHERE id=$1', [id]);
+    await expect(auth.findSession(token)).rejects.toMatchObject({
+      status: 401,
+      code: 'UNAUTHENTICATED',
+    });
+  });
   it('denies Candidate even if member and attendee, independent of dates/status', async () => {
     await pool.query(
       "INSERT INTO meeting_attendees VALUES($1,'candidate01@example.test','Candidate',$2)",
@@ -320,6 +364,19 @@ describe('TEST-MM-008/009/025 real SQL password and current-principal checks', (
     await deadPool.end();
     const deadModel = new AuthModel(deadPool);
     const deadAuth = new AuthService(deadModel, tokens, provider, 'unused');
+    for (const identity of [
+      { authMethod: 'password' as const, subject: fixtureIds.member },
+      {
+        authMethod: 'google' as const,
+        subject: 'google:controlled',
+        verifiedEmail: 'sample01@example.test',
+      },
+    ]) {
+      await expect(deadAuth.findPrincipal(identity)).rejects.toMatchObject({
+        status: 503,
+        code: 'DEPENDENCY_UNAVAILABLE',
+      });
+    }
     const deadApp = createApp(
       config,
       deadAuth,

@@ -51,7 +51,13 @@ function list(): MeetingList {
     referenceTime: "2026-10-08T02:00:00Z",
     snapshot: "snapshot",
     groups: {
-      upcomingCurrent: { total: 17, page: 1, pageSize: 10, items: [item] },
+      upcomingCurrent: {
+        total: 17,
+        page: 1,
+        pageSize: 10,
+        totalPages: 2,
+        items: [item],
+      },
       rejectedCancelled: {
         count: 12,
         items: Array.from({ length: 5 }, (_, i) => ({
