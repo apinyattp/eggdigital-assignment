@@ -119,7 +119,11 @@ export class MeetingService {
           .regex(/^[1-9]\d*$/)
           .transform(Number)
           .pipe(z.number().int().positive().safe()),
-        pageSize: z.literal('10').transform(Number),
+        pageSize: z
+          .string()
+          .regex(/^[1-9]\d*$/)
+          .transform(Number)
+          .pipe(z.number().int().positive().max(10)),
         snapshot: z.unknown().optional(),
       })
       .strict()
@@ -136,7 +140,7 @@ export class MeetingService {
         kind: z.literal('meetingList'),
         date: z.iso.date(),
         principal: z.string(),
-        pageSize: z.literal(10),
+        pageSize: z.number().int().positive().max(10),
         referenceTime: instant.regex(/Z$/),
         fingerprint: z.string(),
       })
@@ -182,7 +186,12 @@ export class MeetingService {
       referenceTime: result.referenceTime,
       snapshot,
     };
-    const group = { ...result.groups.upcomingCurrent, page, pageSize };
+    const group = {
+      ...result.groups.upcomingCurrent,
+      page,
+      pageSize,
+      totalPages: Math.ceil(result.groups.upcomingCurrent.total / pageSize),
+    };
     if (section) return { ...header, section, group };
     return {
       ...header,
@@ -244,7 +253,11 @@ export class MeetingService {
           .regex(/^[1-9]\d*$/)
           .transform(Number)
           .pipe(z.number().int().positive().safe()),
-        pageSize: z.literal('50').transform(Number),
+        pageSize: z
+          .string()
+          .regex(/^[1-9]\d*$/)
+          .transform(Number)
+          .pipe(z.number().int().positive().max(50)),
         snapshot: z.unknown().optional(),
       })
       .strict()
@@ -259,7 +272,7 @@ export class MeetingService {
         kind: z.literal('feedbackPage'),
         meetingId: z.uuid(),
         principal: z.string(),
-        pageSize: z.literal(50),
+        pageSize: z.number().int().positive().max(50),
         asOf: instant.regex(/Z$/),
         total: z.number().int().nonnegative().safe(),
       })
@@ -304,6 +317,7 @@ export class MeetingService {
       page,
       pageSize,
       total: result.total,
+      totalPages: Math.ceil(result.total / pageSize),
       asOf: result.asOf,
       snapshot,
     };

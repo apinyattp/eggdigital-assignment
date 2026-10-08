@@ -104,7 +104,13 @@ await page.route("**/api/v1/**", async (route) => {
       referenceTime: "2026-10-08T03:00:00Z",
       snapshot: "synthetic-list",
       groups: {
-        upcomingCurrent: { items: [summary], page: 1, pageSize: 10, total: 1 },
+        upcomingCurrent: {
+          items: [summary],
+          page: 1,
+          pageSize: 10,
+          total: 1,
+          totalPages: 1,
+        },
         rejectedCancelled: { count: 0, items: [] },
         past: { count: 0, items: [] },
       },
@@ -130,6 +136,7 @@ await page.route("**/api/v1/**", async (route) => {
       page: 1,
       pageSize: 50,
       total: 0,
+      totalPages: 0,
       asOf: "2026-10-08T03:00:00Z",
       snapshot: "synthetic-feedback",
     });
@@ -238,20 +245,9 @@ try {
     "PASS delayed identity/list reads use shared content loading; shell persists",
   );
 
-  let prefetchTimeout;
-  try {
-    await Promise.race([
-      (await prefetchedMeeting).finished(),
-      new Promise((_, reject) => {
-        prefetchTimeout = setTimeout(
-          () => reject(new Error("Meeting route prefetch did not finish within 20 seconds")),
-          20000,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(prefetchTimeout);
-  }
+  // Response completion is not the navigation readiness signal. The real
+  // loading boundary is asserted below while its navigation response is held.
+  assert.ok((await prefetchedMeeting).ok(), "Meeting prefetch responded successfully");
   state.summaryGate = deferred();
   const routeRequested = page.waitForRequest((request) => {
     const headers = request.headers();

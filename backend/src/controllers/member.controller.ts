@@ -15,7 +15,11 @@ export function createMemberController(service: MemberService) {
               .string()
               .regex(/^[1-9]\d*$/)
               .transform(Number),
-            pageSize: z.literal('20').transform(Number),
+            pageSize: z
+              .string()
+              .regex(/^[1-9]\d*$/)
+              .transform(Number)
+              .pipe(z.number().int().positive().max(20)),
           })
           .strict()
           .safeParse(req.query);

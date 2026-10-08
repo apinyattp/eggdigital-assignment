@@ -103,7 +103,13 @@ try {
           referenceTime: "2026-10-08T03:00:00Z",
           snapshot: "synthetic",
           groups: {
-            upcomingCurrent: { items: [], page: 1, pageSize: 10, total: 0 },
+            upcomingCurrent: {
+              items: [],
+              page: 1,
+              pageSize: 10,
+              total: 0,
+              totalPages: 0,
+            },
             rejectedCancelled: { count: 0, items: [] },
             past: { count: 0, items: [] },
           },

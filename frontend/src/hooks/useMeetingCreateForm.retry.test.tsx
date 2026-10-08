@@ -110,6 +110,7 @@ beforeEach(() => {
     page: 1,
     pageSize: 20,
     total: 1,
+    totalPages: 1,
   });
   vi.spyOn(meetingsApi, "create").mockResolvedValue({
     meeting: stored,

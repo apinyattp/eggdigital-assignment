@@ -427,3 +427,133 @@ describe('signed snapshot wire validation', () => {
     expect(() => verifySnapshot(token, key)).toThrow();
   });
 });
+
+describe('bounded page sizes and totalPages metadata', () => {
+  it.each([0, 1, 17])(
+    'reports totalPages for %s meetings on first and out-of-range pages',
+    async (total) => {
+      const h = meetingHarness();
+      h.model.readSnapshot.mockResolvedValue({
+        referenceTime: '2026-10-08T03:00:00Z',
+        fingerprint: 'same',
+        groups: {
+          upcomingCurrent: { total, items: [] },
+          rejectedCancelled: { total: 0, items: [] },
+          past: { total: 0, items: [] },
+        },
+      });
+      for (const pageSize of [1, 5, 10]) {
+        const first = await h.service.listMeetings(user, {
+          date: '2026-10-08',
+          page: '1',
+          pageSize: String(pageSize),
+        });
+        expect(first).toMatchObject({
+          groups: {
+            upcomingCurrent: { page: 1, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+          },
+        });
+        const beyond = await h.service.listMeetings(user, {
+          date: '2026-10-08',
+          section: 'upcomingCurrent',
+          page: '99',
+          pageSize: String(pageSize),
+          snapshot: first.snapshot,
+        });
+        expect(beyond).toMatchObject({
+          group: { items: [], page: 99, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+        });
+        expect(h.model.readSnapshot).toHaveBeenLastCalledWith(
+          user,
+          '2026-10-08',
+          pageSize,
+          98 * pageSize,
+          '2026-10-08T03:00:00Z',
+          true,
+        );
+        await expect(
+          h.service.listMeetings(user, {
+            date: '2026-10-08',
+            section: 'upcomingCurrent',
+            page: '2',
+            pageSize: String(pageSize === 1 ? 2 : 1),
+            snapshot: first.snapshot,
+          }),
+        ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+      }
+    },
+  );
+  it.each([0, 1, 55])(
+    'reports totalPages for %s feedback rows and binds the requested size',
+    async (total) => {
+      const h = meetingHarness();
+      h.model.readFeedback.mockResolvedValue({
+        rows: [],
+        ownFeedbackId: null,
+        total,
+        asOf: '2026-10-08T03:00:00Z',
+      });
+      for (const pageSize of [1, 25, 50]) {
+        const first = await h.service.readFeedback(user, stored.id, {
+          page: '1',
+          pageSize: String(pageSize),
+        });
+        expect(first).toMatchObject({
+          page: 1,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
+        });
+        expect(
+          await h.service.readFeedback(user, stored.id, {
+            page: '99',
+            pageSize: String(pageSize),
+            snapshot: first.snapshot,
+          }),
+        ).toMatchObject({
+          items: [],
+          page: 99,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
+        });
+        expect(h.model.readFeedback).toHaveBeenLastCalledWith(
+          user,
+          stored.id,
+          expect.any(String),
+          pageSize,
+          98 * pageSize,
+          '2026-10-08T03:00:00Z',
+        );
+        await expect(
+          h.service.readFeedback(user, stored.id, {
+            page: '2',
+            pageSize: String(pageSize === 1 ? 2 : 1),
+            snapshot: first.snapshot,
+          }),
+        ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+      }
+    },
+  );
+  it.each(['0', '-1', '1.5', '01', '1e1', '51', '9007199254740992', null, ['10']])(
+    'rejects invalid pageSize %j without reading data',
+    async (pageSize) => {
+      const h = meetingHarness();
+      await expect(
+        h.service.listMeetings(user, { date: '2026-10-08', page: '1', pageSize }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(
+        h.service.readFeedback(user, stored.id, { page: '1', pageSize }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(h.model.readSnapshot).not.toHaveBeenCalled();
+      expect(h.model.readFeedback).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects meeting sizes above its smaller cap', async () => {
+    const h = meetingHarness();
+    await expect(
+      h.service.listMeetings(user, { date: '2026-10-08', page: '1', pageSize: '11' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(h.model.readSnapshot).not.toHaveBeenCalled();
+  });
+});

@@ -80,6 +80,7 @@ const page = (
   page: pageNumber,
   pageSize: 50,
   total,
+  totalPages: Math.ceil(total / 50),
   asOf: "2026-10-08T06:00:00Z",
   snapshot: "snapshot",
 });
