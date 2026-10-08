@@ -192,3 +192,11 @@ Browser traffic uses **frontend public origin → `/api/v1` proxy → private ba
 Before declaring deployment complete, verify the selected commit and successful CI, applied migrations, database readiness, frontend login, authenticated same-origin meeting requests, logout and the actual registered Google callback. An empty production database also needs deliberately provisioned legitimate Members; local synthetic seed commands are not a production onboarding process. Target selection, secrets, Member provisioning and actual Railway/browser checks remain pending.
 
 Official deployment references: [GitHub autodeploy and Wait for CI](https://docs.railway.com/deployments/github-autodeploys), [pre-deploy commands](https://docs.railway.com/deployments/pre-deploy-command), and [configuration status](https://docs.railway.com/config-as-code/reference).
+
+## Interactive wireframe
+
+ดู [ภาพรวม flow และวิธีติดตั้ง/เปิดต้นแบบ](doc/README.md): Login → Member/Guest → รายการนัด → Add/Edit/ทีม/Cancel/Delete → Summary พร้อม Notes ส่วนตัวและ Feedback
+
+ต้นแบบอยู่ใน `doc/` ใช้ข้อมูลสมมติและ local static server ไม่ต้องรัน backend ดู [Wireframe](doc/index.html) หรือ [UI design](doc/ui-design.html) โดยดาวน์โหลด/clone แล้วเปิดตามขั้นตอนในคู่มือ
+
+ส่วนนี้เป็นต้นแบบที่เก็บไว้เพื่ออ้างอิงการออกแบบ เส้นทาง Member/Guest ในต้นแบบไม่ใช่สิทธิ์ของแอปปัจจุบัน ซึ่งอนุญาตให้เข้าสู่ระบบเฉพาะ Member ตาม Application flow overview ด้านบน
