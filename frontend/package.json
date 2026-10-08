@@ -18,7 +18,8 @@
     "test:navigation": "node tests/navigation.browser.mjs",
     "test:logout": "node tests/logout.browser.mjs",
     "test:e2e": "node tests/e2e/run-local.mjs",
-    "test:e2e:local": "node tests/e2e/run-local.mjs"
+    "test:e2e:local": "node tests/e2e/run-local.mjs",
+    "test:member-picker": "node tests/member-picker.browser.mjs"
   },
   "dependencies": {
     "next": "16.4.0",
