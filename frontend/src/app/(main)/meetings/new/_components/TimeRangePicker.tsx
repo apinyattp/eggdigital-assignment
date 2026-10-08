@@ -24,7 +24,7 @@ export function TimeRangePicker({
   disabled: boolean;
   onChange: (start: string, end: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<"pointer" | "keyboard" | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   return (
     <>
@@ -36,7 +36,7 @@ export function TimeRangePicker({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-labelledby="time-range-label time-range-value"
-        onClick={() => setOpen(true)}
+        onClick={(event) => setOpen(event.detail === 0 ? "keyboard" : "pointer")}
       >
         <span id="time-range-value">
           {start} – {end}
@@ -56,8 +56,9 @@ export function TimeRangePicker({
         <TimeDialog
           start={start}
           end={end}
+          pointerOpened={open === "pointer"}
           onClose={() => {
-            setOpen(false);
+            setOpen(null);
             requestAnimationFrame(() => trigger.current?.focus());
           }}
           onChange={onChange}
@@ -69,6 +70,7 @@ export function TimeRangePicker({
 function TimeDialog({
   start,
   end,
+  pointerOpened,
   onClose,
   onChange,
 }: {
@@ -76,8 +78,10 @@ function TimeDialog({
   end: string;
   onClose: () => void;
   onChange: (start: string, end: string) => void;
+  pointerOpened: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [pointerFocus, setPointerFocus] = useState(pointerOpened);
   const [draft, setDraft] = useState({ start: split(start), end: split(end) });
   const [active, setActive] = useState<"start" | "end">("start");
   useEffect(() => {
@@ -111,6 +115,9 @@ function TimeDialog({
     <dialog
       ref={dialog}
       className="time-range-dialog"
+      data-pointer-focus={pointerFocus || undefined}
+      onPointerDownCapture={() => setPointerFocus(true)}
+      onKeyDownCapture={() => setPointerFocus(false)}
       aria-labelledby="range-picker-title"
       aria-describedby="range-picker-context"
       onCancel={(event) => {
