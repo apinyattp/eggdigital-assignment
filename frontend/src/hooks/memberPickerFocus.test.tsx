@@ -54,8 +54,6 @@ const meeting: Meeting = {
   status: "PENDING",
   format: "ONSITE",
   location: "Room",
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [
     {
       memberId: null,
