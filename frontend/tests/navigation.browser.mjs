@@ -245,20 +245,9 @@ try {
     "PASS delayed identity/list reads use shared content loading; shell persists",
   );
 
-  let prefetchTimeout;
-  try {
-    await Promise.race([
-      (await prefetchedMeeting).finished(),
-      new Promise((_, reject) => {
-        prefetchTimeout = setTimeout(
-          () => reject(new Error("Meeting route prefetch did not finish within 20 seconds")),
-          20000,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(prefetchTimeout);
-  }
+  // Response completion is not the navigation readiness signal. The real
+  // loading boundary is asserted below while its navigation response is held.
+  assert.ok((await prefetchedMeeting).ok(), "Meeting prefetch responded successfully");
   state.summaryGate = deferred();
   const routeRequested = page.waitForRequest((request) => {
     const headers = request.headers();
