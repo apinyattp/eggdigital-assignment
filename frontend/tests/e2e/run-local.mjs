@@ -15,6 +15,12 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  SUITES,
+  readSelectionRequest,
+  selectCases,
+  summarizeResults,
+} from "./selection.mjs";
 
 const frontend = fileURLToPath(new URL("../../", import.meta.url));
 const backend = fileURLToPath(new URL("../../../backend/", import.meta.url));
@@ -34,7 +40,6 @@ const platformEnv = Object.fromEntries(
     "CI",
     "E2E_HEADED",
     "E2E_TRACE",
-    "E2E_CASE",
     "PWDEBUG",
     "DISPLAY",
     "WAYLAND_DISPLAY",
@@ -232,21 +237,30 @@ function makeFixture(origin, password) {
 }
 
 try {
-  const knownSuites = ["auth", "meetings", "authorization"];
-  const requestedSuite = process.env.E2E_SUITE;
-  const requestedCase = process.env.E2E_CASE;
-  if (requestedSuite !== undefined && !knownSuites.includes(requestedSuite))
-    throw new Error("E2E_SUITE must be auth, meetings, or authorization");
-  if (
-    requestedCase !== undefined &&
-    (!requestedSuite || !/^E2E-[A-Za-z0-9_-]+$/.test(requestedCase))
-  )
-    throw new Error(
-      "E2E_CASE must be an exact scenario ID and requires E2E_SUITE",
+  const request = readSelectionRequest(process.env);
+  const inventory = [];
+  for (const suite of SUITES) {
+    const discovery = spawnSync(
+      process.execPath,
+      [`tests/e2e/${suite}.browser.mjs`, "--list-cases"],
+      {
+        cwd: frontend,
+        env: platformEnv,
+        encoding: "utf8",
+        timeout: 20_000,
+      },
     );
-  const suites = (requestedSuite ? [requestedSuite] : knownSuites).map(
-    (name) => name + ".browser.mjs",
-  );
+    if (discovery.status !== 0)
+      throw new Error(`Scenario discovery failed for ${suite}`);
+    const cases = JSON.parse(discovery.stdout);
+    if (!Array.isArray(cases) || cases.some((entry) => entry.suite !== suite))
+      throw new Error(`Invalid scenario discovery for ${suite}`);
+    inventory.push(...cases);
+  }
+  const selected = selectCases(inventory, request);
+  const suites = SUITES.filter((suite) =>
+    selected.some((entry) => entry.suite === suite),
+  ).map((suite) => `${suite}.browser.mjs`);
   for (const folder of [frontend, backend]) {
     await access(path.join(folder, "node_modules"));
     if (
@@ -261,6 +275,7 @@ try {
   const browsers = (process.env.E2E_BROWSERS ?? "chromium").split(",");
   if (
     !browsers.length ||
+    new Set(browsers).size !== browsers.length ||
     browsers.some((value) => !["chromium", "webkit"].includes(value))
   )
     throw new Error(
@@ -288,8 +303,15 @@ try {
         : null,
     dirty: state.status === 0 ? Boolean(state.stdout.trim()) : null,
     browsers,
-    suite: requestedSuite ?? null,
-    case: requestedCase ?? null,
+    profile: request.profile,
+    suite: request.suite ?? null,
+    case: request.selectedCase ?? null,
+    selectedCaseIds: selected.map(({ id }) => id),
+    expectedCasesPerBrowser: selected.length,
+    expectedExecutions: selected.length * browsers.length,
+    completedExecutions: 0,
+    passed: 0,
+    failed: 0,
     startedAt: new Date().toISOString(),
     status: "running",
   };
@@ -446,18 +468,26 @@ try {
     "frontend",
   );
   await ready(origin, fe, "/login");
-  const failedSuites = [];
+  const failedSuites = new Set();
   for (const browser of browsers)
     for (const suite of suites) {
       if (interrupted) throw new Error("E2E run interrupted");
       await access(path.join(frontend, "tests/e2e", suite));
       process.stdout.write(`Running ${suite} on ${browser} (serial)…\n`);
+      const selectedCaseIds = selected
+        .filter((entry) => entry.suite === suite.replace(".browser.mjs", ""))
+        .map(({ id }) => id);
       const child = start(
         process.execPath,
         ["tests/e2e/" + suite],
         frontend,
         browser + "-" + suite,
-        { ...env, PLAYWRIGHT_BROWSER: browser },
+        {
+          ...env,
+          PLAYWRIGHT_BROWSER: browser,
+          E2E_PROFILE: request.profile,
+          E2E_SELECTED_CASES: JSON.stringify(selectedCaseIds),
+        },
       );
       try {
         await completion(child, `${browser} ${suite}`);
@@ -469,7 +499,7 @@ try {
           (child.exitCode === null && child.signalCode === null)
         )
           throw error;
-        failedSuites.push(`${browser} ${suite}`);
+        failedSuites.add(`${browser} ${suite}`);
         process.stdout.write(
           `FAILED ${browser} ${suite}; collecting remaining suites\n`,
         );
@@ -487,6 +517,28 @@ try {
             "utf8",
           ),
         );
+        if (
+          report.runId !== runId ||
+          report.engine !== browser ||
+          report.suite !== suite.replace(".browser.mjs", "") ||
+          report.profile !== request.profile ||
+          report.expectedCases !== selectedCaseIds.length ||
+          JSON.stringify(report.selectedCaseIds) !==
+            JSON.stringify(selectedCaseIds)
+        )
+          throw new Error(
+            "Scenario report does not match this run's selection",
+          );
+        const counts = summarizeResults(report.results, selectedCaseIds);
+        manifest.completedExecutions += counts.completed;
+        manifest.passed += counts.passed;
+        manifest.failed += counts.failed;
+        if (counts.missing.length || counts.failed) {
+          failedSuites.add(`${browser} ${suite}`);
+          process.stdout.write(
+            `Incomplete or failed selected scenarios for ${browser} ${suite}\n`,
+          );
+        }
         for (const result of report.results)
           process.stdout.write(JSON.stringify(result) + "\n");
         if (report.initializationError)
@@ -494,14 +546,20 @@ try {
             JSON.stringify(report.initializationError) + "\n",
           );
       } catch {
+        failedSuites.add(`${browser} ${suite}`);
         process.stdout.write(
-          `No safe scenario report was produced for ${browser} ${suite}\n`,
+          `Missing or invalid selected scenario report for ${browser} ${suite}\n`,
         );
       }
     }
-  if (failedSuites.length) {
-    manifest.failedSuites = failedSuites;
-    throw new Error("E2E suites failed: " + failedSuites.join(", "));
+  if (
+    manifest.completedExecutions !== manifest.expectedExecutions &&
+    !failedSuites.size
+  )
+    throw new Error("Selected scenario execution count is incomplete");
+  if (failedSuites.size) {
+    manifest.failedSuites = [...failedSuites];
+    throw new Error("E2E suites failed: " + [...failedSuites].join(", "));
   }
   process.stdout.write(`Local real-stack E2E passed. Evidence: ${evidence}\n`);
 } catch (error) {

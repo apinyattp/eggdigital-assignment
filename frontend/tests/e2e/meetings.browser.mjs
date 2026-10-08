@@ -115,137 +115,162 @@ await runSuite("meetings", async ({ run }) => {
     );
   });
 
-  await run("E2E-MEMBER-01", async ({ page, fixture, origin }) => {
-    await login(page, fixture.accounts.owner);
-    await page.goto(`${origin}/meetings/new`);
-    const search = page.getByRole("combobox", {
-      name: "Interview Teams Email",
-    });
-    await search.fill("E2E Team");
-    await check(async () =>
-      assert.equal(
-        await page.getByRole("listbox").getByRole("option").count(),
-        20,
-      ),
-    );
-    let secondPageRequests = 0;
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        url.pathname === "/api/v1/members" &&
-        url.searchParams.get("page") === "2"
-      )
-        secondPageRequests++;
-    });
-    await page.getByRole("button", { name: "Load more members" }).click();
-    try {
+  await run(
+    "E2E-MEMBER-01",
+    async ({ page, fixture, origin }) => {
+      await login(page, fixture.accounts.owner);
+      await page.goto(`${origin}/meetings/new`);
+      const search = page.getByRole("combobox", {
+        name: "Interview Teams Email",
+      });
+      await search.fill("E2E Team");
       await check(async () =>
         assert.equal(
           await page.getByRole("listbox").getByRole("option").count(),
-          40,
+          20,
         ),
       );
-    } catch (error) {
-      const focus = await page.evaluate(() => ({
-        tag: document.activeElement?.tagName,
-        id: document.activeElement?.id,
-      }));
-      error.message +=
-        "\nMember pagination state: " +
-        JSON.stringify({
-          secondPageRequests,
-          expanded: await search.getAttribute("aria-expanded"),
-          focus,
-        });
-      throw error;
-    }
-    await page.getByRole("button", { name: "Load more members" }).click();
-    await check(async () =>
+      let secondPageRequests = 0;
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (
+          url.pathname === "/api/v1/members" &&
+          url.searchParams.get("page") === "2"
+        )
+          secondPageRequests++;
+      });
+      await page.getByRole("button", { name: "Load more members" }).click();
+      try {
+        await check(async () =>
+          assert.equal(
+            await page.getByRole("listbox").getByRole("option").count(),
+            40,
+          ),
+        );
+      } catch (error) {
+        const focus = await page.evaluate(() => ({
+          tag: document.activeElement?.tagName,
+          id: document.activeElement?.id,
+        }));
+        error.message +=
+          "\nMember pagination state: " +
+          JSON.stringify({
+            secondPageRequests,
+            expanded: await search.getAttribute("aria-expanded"),
+            focus,
+          });
+        throw error;
+      }
+      await page.getByRole("button", { name: "Load more members" }).click();
+      await check(async () =>
+        assert.equal(
+          await page.getByRole("listbox").getByRole("option").count(),
+          55,
+        ),
+      );
       assert.equal(
-        await page.getByRole("listbox").getByRole("option").count(),
-        55,
-      ),
-    );
-    assert.equal(
-      await page.getByRole("button", { name: "Load more members" }).count(),
-      0,
-    );
-    const memberOptions = await page
-      .getByRole("listbox")
-      .getByRole("option")
-      .allTextContents();
-    assert.equal(new Set(memberOptions).size, 55);
-    await search.fill(fixture.accounts.attendee.email);
-    const option = page
-      .getByRole("option")
-      .filter({ hasText: fixture.accounts.attendee.email });
-    await option.click();
-    await page
-      .getByRole("button", {
-        name: `Remove ${fixture.accounts.attendee.displayName}`,
-      })
-      .waitFor();
-    await search.fill("no-such-member-e2e");
-    await page
-      .getByText("No available members found. Try another name or email.")
-      .waitFor();
-    await search.fill("");
-    assert.equal(
-      await page.getByRole("listbox").getByRole("option").count(),
-      0,
-    );
-    await page
-      .getByRole("button", {
-        name: `Remove ${fixture.accounts.attendee.displayName}`,
-      })
-      .click();
-    assert.equal(
+        await page.getByRole("button", { name: "Load more members" }).count(),
+        0,
+      );
+      const memberOptions = await page
+        .getByRole("listbox")
+        .getByRole("option")
+        .allTextContents();
+      assert.equal(new Set(memberOptions).size, 55);
+      await search.fill(fixture.accounts.attendee.email);
+      const option = page
+        .getByRole("option")
+        .filter({ hasText: fixture.accounts.attendee.email });
+      await option.click();
       await page
         .getByRole("button", {
           name: `Remove ${fixture.accounts.attendee.displayName}`,
         })
-        .count(),
-      0,
-    );
-  });
+        .waitFor();
+      await search.fill("no-such-member-e2e");
+      await page
+        .getByText("No available members found. Try another name or email.")
+        .waitFor();
+      await search.fill("");
+      assert.equal(
+        await page.getByRole("listbox").getByRole("option").count(),
+        0,
+      );
+      await page
+        .getByRole("button", {
+          name: `Remove ${fixture.accounts.attendee.displayName}`,
+        })
+        .click();
+      assert.equal(
+        await page
+          .getByRole("button", {
+            name: `Remove ${fixture.accounts.attendee.displayName}`,
+          })
+          .count(),
+        0,
+      );
+    },
+    { tags: ["@critical"] },
+  );
 
   for (const format of ["ONSITE", "ONLINE"]) {
-    await run(`E2E-CREATE-${format}`, async ({ page, fixture, origin }) => {
-      await login(page, fixture.accounts.owner);
-      await page.goto(`${origin}/meetings/new`);
-      await page
-        .getByRole("button", { name: "Save Meeting", exact: true })
-        .click();
-      await page.getByText("This field is required.").first().waitFor();
-      await fillMeeting(page, fixture, `E2E ${format} created`, format);
-      if (format === "ONLINE") {
-        await page
-          .getByRole("textbox", { name: "Meeting link", exact: true })
-          .fill("http://insecure.example.test");
+    await run(
+      `E2E-CREATE-${format}`,
+      async ({ page, fixture, origin }) => {
+        await login(page, fixture.accounts.owner);
+        await page.goto(`${origin}/meetings/new`);
         await page
           .getByRole("button", { name: "Save Meeting", exact: true })
           .click();
-        await page.getByText("Enter a valid HTTPS meeting link.").waitFor();
-        await page
-          .getByRole("textbox", { name: "Meeting link", exact: true })
-          .fill("https://meet.example.test/e2e");
-      }
-      const id = await saveCreated(page);
-      const snapshot = await inspectFixture();
-      const saved = snapshot.meetings.find((meeting) => meeting.id === id);
-      assert.equal(saved.title, `E2E ${format} created`);
-      assert.equal(saved.format, format);
-      await page.reload();
-      await page.getByRole("heading", { name: "Candidate profile" }).waitFor();
-      await page.getByText("E2E Created Candidate", { exact: true }).waitFor();
-      if (format === "ONLINE")
-        assert.equal(
+        await page.getByText("This field is required.").first().waitFor();
+        await fillMeeting(page, fixture, `E2E ${format} created`, format);
+        if (format === "ONLINE") {
           await page
-            .getByRole("link", { name: "Join Meeting" })
-            .getAttribute("href"),
-          "https://meet.example.test/e2e",
+            .getByRole("textbox", { name: "Meeting link", exact: true })
+            .fill("http://insecure.example.test");
+          await page
+            .getByRole("button", { name: "Save Meeting", exact: true })
+            .click();
+          await page.getByText("Enter a valid HTTPS meeting link.").waitFor();
+          await page
+            .getByRole("textbox", { name: "Meeting link", exact: true })
+            .fill("https://meet.example.test/e2e");
+        }
+        const id = await saveCreated(page);
+        const snapshot = await inspectFixture();
+        const saved = snapshot.meetings.find((meeting) => meeting.id === id);
+        assert.equal(saved.title, `E2E ${format} created`);
+        assert.equal(saved.format, format);
+        assert.equal(saved.creatorId, fixture.accounts.owner.id);
+        assert.equal(saved.candidateName, "E2E Created Candidate");
+        assert.equal(saved.candidateEmail, "created-candidate@example.test");
+        assert.equal(
+          saved.joinUrl,
+          format === "ONLINE" ? "https://meet.example.test/e2e" : null,
         );
-    });
+        assert.deepEqual(
+          snapshot.attendees
+            .filter((row) => row.meetingId === id)
+            .map((row) => row.memberId),
+          [fixture.accounts.attendee.id],
+        );
+        await page.reload();
+        await page
+          .getByRole("heading", { name: "Candidate profile" })
+          .waitFor();
+        await page
+          .getByText("E2E Created Candidate", { exact: true })
+          .waitFor();
+        if (format === "ONLINE")
+          assert.equal(
+            await page
+              .getByRole("link", { name: "Join Meeting" })
+              .getAttribute("href"),
+            "https://meet.example.test/e2e",
+          );
+      },
+      { tags: ["@critical"] },
+    );
   }
 
   await run(
@@ -296,70 +321,80 @@ await runSuite("meetings", async ({ run }) => {
     "real local stack with injected loss of committed create response",
   );
 
-  await run("E2E-EDIT-01", async ({ page, fixture, origin }) => {
-    await login(page, fixture.accounts.owner);
-    await detail(page, origin, fixture.meetings.onsite);
-    await page.getByRole("link", { name: "Edit Meeting", exact: true }).click();
-    await page
-      .getByRole("textbox", { name: "Title", exact: true })
-      .fill("E2E edited title");
-    await page.getByLabel("Status", { exact: true }).selectOption("CONFIRMED");
-    await page
-      .getByLabel("Preparation Notes", { exact: true })
-      .fill("E2E edited preparation");
-    await page
-      .getByRole("combobox", { name: "Interview Teams Email" })
-      .fill(fixture.accounts.outsider.email);
-    await page
-      .getByRole("option")
-      .filter({ hasText: fixture.accounts.outsider.email })
-      .click();
-    await page
-      .getByRole("button", {
-        name: `Remove ${fixture.accounts.attendee.displayName}`,
-      })
-      .click();
-    await page
-      .getByRole("button", { name: "Save Meeting", exact: true })
-      .click();
-    await check(async () =>
+  await run(
+    "E2E-EDIT-01",
+    async ({ page, fixture, origin }) => {
+      await login(page, fixture.accounts.owner);
+      await detail(page, origin, fixture.meetings.onsite);
+      await page
+        .getByRole("link", { name: "Edit Meeting", exact: true })
+        .click();
+      await page
+        .getByRole("textbox", { name: "Title", exact: true })
+        .fill("E2E edited title");
+      await page
+        .getByLabel("Status", { exact: true })
+        .selectOption("CONFIRMED");
+      await page
+        .getByLabel("Preparation Notes", { exact: true })
+        .fill("E2E edited preparation");
+      await page
+        .getByRole("combobox", { name: "Interview Teams Email" })
+        .fill(fixture.accounts.outsider.email);
+      await page
+        .getByRole("option")
+        .filter({ hasText: fixture.accounts.outsider.email })
+        .click();
+      await page
+        .getByRole("button", {
+          name: `Remove ${fixture.accounts.attendee.displayName}`,
+        })
+        .click();
+      await page
+        .getByRole("button", { name: "Save Meeting", exact: true })
+        .click();
+      await check(async () =>
+        assert.equal(
+          (await inspectFixture()).meetings.find(
+            (meeting) => meeting.id === fixture.meetings.onsite.id,
+          ).title,
+          "E2E edited title",
+        ),
+      );
+      const team = (await inspectFixture()).attendees.filter(
+        (row) => row.meetingId === fixture.meetings.onsite.id,
+      );
+      assert.ok(
+        team.some((row) => row.memberId === fixture.accounts.outsider.id),
+      );
+      assert.equal(
+        team.some((row) => row.memberId === fixture.accounts.attendee.id),
+        false,
+      );
       assert.equal(
         (await inspectFixture()).meetings.find(
           (meeting) => meeting.id === fixture.meetings.onsite.id,
-        ).title,
-        "E2E edited title",
-      ),
-    );
-    const team = (await inspectFixture()).attendees.filter(
-      (row) => row.meetingId === fixture.meetings.onsite.id,
-    );
-    assert.ok(
-      team.some((row) => row.memberId === fixture.accounts.outsider.id),
-    );
-    assert.equal(
-      team.some((row) => row.memberId === fixture.accounts.attendee.id),
-      false,
-    );
-    assert.equal(
-      (await inspectFixture()).meetings.find(
-        (meeting) => meeting.id === fixture.meetings.onsite.id,
-      ).status,
-      "CONFIRMED",
-    );
-    await page.reload();
-    await check(async () =>
+        ).status,
+        "CONFIRMED",
+      );
+      await page.reload();
+      await check(async () =>
+        assert.equal(
+          await page
+            .getByRole("textbox", { name: "Title", exact: true })
+            .inputValue(),
+          "E2E edited title",
+        ),
+      );
       assert.equal(
         await page
-          .getByRole("textbox", { name: "Title", exact: true })
+          .getByLabel("Preparation Notes", { exact: true })
           .inputValue(),
-        "E2E edited title",
-      ),
-    );
-    assert.equal(
-      await page.getByLabel("Preparation Notes", { exact: true }).inputValue(),
-      "E2E edited preparation",
-    );
-  });
+        "E2E edited preparation",
+      );
+    },
+    { tags: ["@critical"] },
+  );
 
   await run("E2E-CANCEL-01", async ({ page, fixture, origin }) => {
     await login(page, fixture.accounts.owner);
@@ -399,58 +434,70 @@ await runSuite("meetings", async ({ run }) => {
     );
   });
 
-  await run("E2E-DELETE-01", async ({ page, fixture, origin }) => {
-    await login(page, fixture.accounts.owner);
-    await detail(page, origin, fixture.meetings.onsite);
-    await page
-      .getByRole("button", { name: "Add Feedback", exact: true })
-      .click();
-    const feedback = page.getByRole("dialog", { name: "Add Feedback" });
-    await feedback
-      .getByLabel("Interview feedback", { exact: true })
-      .fill("E2E feedback deleted with its meeting");
-    await feedback.getByRole("button", { name: "Save Feedback" }).click();
-    await page
-      .getByText("E2E feedback deleted with its meeting", { exact: true })
-      .waitFor();
-    await page
-      .getByRole("button", { name: "Delete Meeting", exact: true })
-      .click();
-    await page.getByRole("button", { name: "Keep Meeting" }).click();
-    assert.ok(
-      (await inspectFixture()).meetings.some(
-        (meeting) => meeting.id === fixture.meetings.onsite.id,
-      ),
-    );
-    await page
-      .getByRole("button", { name: "Delete Meeting", exact: true })
-      .click();
-    await page.getByRole("button", { name: "Confirm Delete" }).click();
-    await page.waitForURL("**/dashboard*");
-    const after = await inspectFixture();
-    assert.equal(
-      after.meetings.some(
-        (meeting) => meeting.id === fixture.meetings.onsite.id,
-      ),
-      false,
-    );
-    assert.equal(
-      after.notes.some((note) => note.meetingId === fixture.meetings.onsite.id),
-      false,
-    );
-    assert.equal(
-      after.feedback.some(
-        (row) => row.meetingId === fixture.meetings.onsite.id,
-      ),
-      false,
-    );
-    await page.goto(`${origin}/meetings/${fixture.meetings.onsite.id}`);
-    await page
-      .getByRole("heading", {
-        name: "Meeting not found or you do not have access.",
-      })
-      .waitFor();
-  });
+  await run(
+    "E2E-DELETE-01",
+    async ({ page, fixture, origin }) => {
+      await login(page, fixture.accounts.owner);
+      await detail(page, origin, fixture.meetings.onsite);
+      await page
+        .getByRole("button", { name: "Add Feedback", exact: true })
+        .click();
+      const feedback = page.getByRole("dialog", { name: "Add Feedback" });
+      await feedback
+        .getByLabel("Interview feedback", { exact: true })
+        .fill("E2E feedback deleted with its meeting");
+      await feedback.getByRole("button", { name: "Save Feedback" }).click();
+      await page
+        .getByText("E2E feedback deleted with its meeting", { exact: true })
+        .waitFor();
+      await page
+        .getByRole("button", { name: "Delete Meeting", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Keep Meeting" }).click();
+      assert.ok(
+        (await inspectFixture()).meetings.some(
+          (meeting) => meeting.id === fixture.meetings.onsite.id,
+        ),
+      );
+      await page
+        .getByRole("button", { name: "Delete Meeting", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Confirm Delete" }).click();
+      await page.waitForURL("**/dashboard*");
+      const after = await inspectFixture();
+      assert.equal(
+        after.meetings.some(
+          (meeting) => meeting.id === fixture.meetings.onsite.id,
+        ),
+        false,
+      );
+      assert.equal(
+        after.attendees.some(
+          (row) => row.meetingId === fixture.meetings.onsite.id,
+        ),
+        false,
+      );
+      assert.equal(
+        after.notes.some(
+          (note) => note.meetingId === fixture.meetings.onsite.id,
+        ),
+        false,
+      );
+      assert.equal(
+        after.feedback.some(
+          (row) => row.meetingId === fixture.meetings.onsite.id,
+        ),
+        false,
+      );
+      await page.goto(`${origin}/meetings/${fixture.meetings.onsite.id}`);
+      await page
+        .getByRole("heading", {
+          name: "Meeting not found or you do not have access.",
+        })
+        .waitFor();
+    },
+    { tags: ["@critical"] },
+  );
 
   await run("E2E-FEEDBACK-01", async ({ page, fixture, origin }) => {
     await login(page, fixture.accounts.owner);
@@ -646,7 +693,7 @@ await runSuite("meetings", async ({ run }) => {
         release();
       }
     },
-    {},
+    { tags: ["@critical"] },
     "real local stack with held App Router navigation response",
   );
 

@@ -127,6 +127,7 @@ await runSuite("auth", async ({ run }) => {
         fixture.accounts.owner.id,
       );
     },
+    { tags: ["@critical"] },
   );
 
   await run(
@@ -165,7 +166,7 @@ await runSuite("auth", async ({ run }) => {
       await button.locator("span").tap();
       await assertSignedOut({ page, context, origin });
     },
-    mobile,
+    { ...mobile, tags: ["@critical"] },
   );
 
   await run(

@@ -19,6 +19,7 @@
     "test:logout": "node tests/logout.browser.mjs",
     "test:e2e": "node tests/e2e/run-local.mjs",
     "test:e2e:local": "node tests/e2e/run-local.mjs",
+    "test:e2e:selection": "node --test tests/e2e/selection.test.mjs",
     "test:member-picker": "node tests/member-picker.browser.mjs"
   },
   "dependencies": {

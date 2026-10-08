@@ -36,6 +36,34 @@ E2E_BROWSERS=chromium,webkit npm --prefix frontend run test:e2e
 
 The full selection defines 27 scenarios per browser: 9 auth/session cases, 13 meeting/content/navigation cases, and 5 authorization/private-note cases. `test:e2e:local` remains an alias of the same entry point.
 
+Run the tagged critical selection in both engines:
+
+```sh
+E2E_PROFILE=critical E2E_BROWSERS=chromium,webkit npm --prefix frontend run test:e2e
+```
+
+`E2E_PROFILE` defaults to `full` locally. Critical selection uses explicit `tags: ["@critical"]` metadata on the existing cases; folders stay organized by feature. This project uses Playwright's browser library with a custom runner, not `@playwright/test`, so `--grep @critical` is not the command. The runner strips metadata before creating browser contexts and executes the same test bodies. Full runs omit tag filtering. Unknown profiles, missing/duplicate inventory IDs, and empty selections fail.
+
+The eight tagged cases per engine are:
+
+| Critical case                              | Core behavior                                                                                |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `E2E-AUTH-01-password-and-protected-route` | Real login, anonymous protection, rejected password, server identity and reload persistence. |
+| `E2E-AUTH-03-mobile-logout-and-reload`     | Touch logout, cleared/expired session cookies, server 401 and protected reload.              |
+| `E2E-MEMBER-01`                            | Team selection/removal and real member pagination through 20, 40 and 55 results.             |
+| `E2E-CREATE-ONSITE`, `E2E-CREATE-ONLINE`   | Both create formats, persisted meeting/team data and reload.                                 |
+| `E2E-EDIT-01`                              | Persisted title/status/team changes and preparation text after reload.                       |
+| `E2E-DELETE-01`                            | Confirmed deletion and dependent records removed; the old URL is inaccessible.               |
+| `E2E-NAVIGATION-01`                        | Held authenticated route loading, persistent shell, Back/Forward and completion.             |
+
+The existing Frontend CI also retains its seven controlled-response navigation checks in Chromium and six create/edit picker mouse/touch/keyboard cases in each browser, including held responses and repeated disabled Load more activation from PR #18. These focused regressions exercise timing and focus contracts; the real-stack tagged cases verify persisted outcomes. They are complementary and are not duplicated into a second E2E foundation.
+
+Check selection without starting Docker or a browser:
+
+```sh
+npm --prefix frontend run test:e2e:selection
+```
+
 Run one suite:
 
 ```sh
@@ -56,6 +84,7 @@ Optional environment settings:
 
 | Setting                      | Purpose                                                                     |
 | ---------------------------- | --------------------------------------------------------------------------- |
+| `E2E_PROFILE`                | `full` (local default) or `critical` (only `@critical` cases).              |
 | `E2E_BROWSERS`               | `chromium` (default), `webkit`, or `chromium,webkit`.                       |
 | `E2E_SUITE`                  | Select `auth`, `meetings`, or `authorization`; omitted means all three.     |
 | `E2E_CASE`                   | Exact scenario ID within the required `E2E_SUITE`.                          |
@@ -133,7 +162,46 @@ On normal completion, failure, or handled interruption, the runner terminates it
 
 ## GitHub Actions
 
-[`.github/workflows/e2e-ci.yml`](../../../.github/workflows/e2e-ci.yml) defines the **Real-stack E2E** workflow. It runs for pull requests, pushes to `main`, and manual dispatch. The `chromium` and `webkit` matrix jobs run one at a time on `ubuntu-latest`, each with a 35-minute timeout. The workflow installs Node 24.19.0, both application dependency sets, and the selected browser plus host libraries, then calls the same real-stack entry point used locally.
+[`.github/workflows/e2e-ci.yml`](../../../.github/workflows/e2e-ci.yml) defines the **Real-stack E2E** workflow. Pull requests targeting `main` and pushes to `main` run `critical` by default. Both events run the same critical selection; the push run tests the merged commit and provides checks for the deployment branch. A PR labeled `e2e:full` runs `full` instead, including on later PR updates while that label remains. Adding the label triggers a run; remove/re-add it to request another full run on an unchanged PR head. Other added labels run the ordinary selected profile, never replace a failing test with a skipped check.
+
+Manual `workflow_dispatch` offers `profile: full` (default) or `critical`. The `chromium` and `webkit` matrix jobs run one at a time on `ubuntu-latest`, each with a 35-minute timeout. Both profiles use the same jobs and stable names: **Real-stack E2E (chromium)** and **Real-stack E2E (webkit)**. The run title and safe manifests identify the profile. Each job installs dependencies, validates the selection, and runs the same owned real-stack entry point. No case is retried or discarded to make a profile green.
+
+Frontend CI retains unit tests, types, lint, production/image builds, and navigation/member-picker regressions. Backend CI retains all 249 unit and 108 PostgreSQL integration checks plus types/build/image; it also runs the existing `format:check` script. Test counts describe the current inventory and may increase with future changes.
+
+The owner should require these exact check names for PRs targeting `main`:
+
+- `frontend` (workflow **Frontend CI**)
+- `backend` (workflow **Backend CI**)
+- `Real-stack E2E (chromium)`
+- `Real-stack E2E (webkit)`
+
+These names must be confirmed from the final run's checks. Branch-protection/ruleset enforcement was not verified: the prior administration read returned GitHub 403. This change neither modifies nor claims enforced branch protection.
+
+### Full pre-release run
+
+1. Choose the exact release-candidate branch/tag and record its commit. After this workflow exists on the default branch, open **Actions → Real-stack E2E → Run workflow**, select that ref, choose **full**, and run it. Equivalent CLI:
+
+   ```sh
+   gh workflow run e2e-ci.yml --ref RELEASE_CANDIDATE_REF -f profile=full
+   gh run list --workflow e2e-ci.yml --limit 5
+   gh run watch RUN_ID --exit-status
+   ```
+
+2. Confirm the run's head SHA matches the release candidate, the manifests say `full` with no suite/case filter, and all 27 cases passed in each engine (54 total). Confirm cleanup succeeded and the ordinary frontend/backend checks are green on the same candidate. A critical run alone is not a full-release signoff. If the candidate changes, run full again.
+3. Before the new workflow is present on the default branch, GitHub does not offer `workflow_dispatch` for it. Use the `e2e:full` PR label for full CI validation of this draft instead; this does not authorize merging or deploying. See [GitHub's manual-run prerequisite](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+Local equivalent, after clearing debug filters:
+
+```sh
+unset E2E_SUITE E2E_CASE
+E2E_PROFILE=full E2E_BROWSERS=chromium,webkit npm --prefix frontend run test:e2e
+```
+
+Record actual run timestamps and per-browser execution durations; setup/build/queue time is part of pipeline duration. Do not infer a fixed time from selecting eight cases: stack builds and browser installation still occur. The PR report records measured critical and full runs for the submitted commit.
+
+### Railway deployment gate
+
+To make GitHub checks gate Railway autodeploys, an owner must verify **Wait for CI** on each frontend/backend service, the configured deployment branch, and the necessary Railway GitHub App permissions. Railway requires workflows triggered by `push` on that branch; all three workflows here include `main` pushes. This workflow's default `main` push runs critical, so run the full release procedure separately on the exact candidate before an approved release. Railway settings were not inspected or changed. A green PR does not establish that Railway waits for CI. See [Railway's requirements and skipped/cancelled-workflow semantics](https://docs.railway.com/deployments/github-autodeploys).
 
 Both jobs use an owned loopback PostgreSQL container and generated application secrets. They do not need repository database/login/provider secrets and do not contact a deployed application. A failed browser job fails its check; the other browser still runs because the matrix has `fail-fast: false`.
 

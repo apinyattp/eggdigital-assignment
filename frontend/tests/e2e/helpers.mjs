@@ -3,6 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, webkit } from "playwright";
 import { loadFixture, resetFixture } from "./fixture.mjs";
+import {
+  collectCases,
+  metadata,
+  selectRegisteredCases,
+  summarizeResults,
+} from "./selection.mjs";
 
 export async function check(assertion, timeout = 10000) {
   const end = Date.now() + timeout;
@@ -63,6 +69,17 @@ export async function chooseDate(page, label, date) {
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
 }
 export async function runSuite(suite, execute) {
+  const registered = await collectCases(suite, execute);
+  if (process.argv.includes("--list-cases")) {
+    process.stdout.write(JSON.stringify(metadata(registered)) + "\n");
+    return;
+  }
+  const selected = selectRegisteredCases(
+    registered,
+    JSON.parse(process.env.E2E_SELECTED_CASES ?? "[]"),
+  );
+  const selectedCaseIds = selected.map(({ id }) => id);
+  const profile = process.env.E2E_PROFILE ?? "full";
   const fixture = await loadFixture();
   const origin = process.env.FE_TEST_ORIGIN ?? fixture.origin;
   assert.ok(["127.0.0.1", "localhost"].includes(new URL(origin).hostname));
@@ -90,7 +107,16 @@ export async function runSuite(suite, execute) {
     await fs.writeFile(
       path.join(directory, "results.json"),
       JSON.stringify(
-        { suite, engine, results: [], initializationError },
+        {
+          suite,
+          engine,
+          profile,
+          runId: process.env.E2E_RUN_ID,
+          selectedCaseIds,
+          expectedCases: selected.length,
+          results: [],
+          initializationError,
+        },
         null,
         2,
       ),
@@ -101,16 +127,7 @@ export async function runSuite(suite, execute) {
   }
   const results = [];
   const collectTraces = process.env.E2E_TRACE === "1" && !process.env.CI;
-  const selectedCase = process.env.E2E_CASE;
-  let selectedCount = 0;
-  async function run(
-    id,
-    scenario,
-    options = {},
-    scope = "real local frontend/backend/PostgreSQL",
-  ) {
-    if (selectedCase && selectedCase !== id) return;
-    selectedCount++;
+  async function run({ id, scenario, contextOptions: options, scope, tags }) {
     const fixture = await resetFixture();
     const actors = [];
     const errors = [];
@@ -167,7 +184,7 @@ export async function runSuite(suite, execute) {
       });
       if (collectTraces)
         for (const actor of actors) await actor.context.tracing.stop();
-      results.push({ id, status: "PASS", scope });
+      results.push({ id, status: "PASS", scope, tags });
       console.log(`PASS ${engine} ${id}`);
     } catch (error) {
       await page
@@ -204,20 +221,33 @@ export async function runSuite(suite, execute) {
           "[REDACTED JWT]",
         )
         .slice(0, 2000);
-      results.push({ id, status: "FAIL", scope, error: message });
+      results.push({ id, status: "FAIL", scope, tags, error: message });
       console.error(`FAIL ${engine} ${id}`);
     } finally {
       for (const actor of actors) await actor.context.close();
       await fs.writeFile(
         path.join(directory, "results.json"),
-        JSON.stringify({ suite, engine, results }, null, 2),
+        JSON.stringify(
+          {
+            suite,
+            engine,
+            profile,
+            runId: process.env.E2E_RUN_ID,
+            selectedCaseIds,
+            expectedCases: selected.length,
+            results,
+          },
+          null,
+          2,
+        ),
       );
     }
   }
   try {
-    await execute({ browser, fixture, origin, run });
-    if (selectedCase && selectedCount === 0)
-      throw new Error(`Unknown E2E_CASE: ${selectedCase}`);
+    for (const entry of selected) await run(entry);
+    const counts = summarizeResults(results, selectedCaseIds);
+    if (counts.missing.length)
+      throw new Error("Selected scenarios did not all produce results");
     const failed = results.filter((result) => result.status === "FAIL");
     if (failed.length)
       throw new Error(
