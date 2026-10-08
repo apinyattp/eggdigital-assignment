@@ -41,7 +41,6 @@ describe("confirmed Add temporal and independent-text rules", () => {
           now,
         ).fields.end,
       ).toBeTruthy();
-      expect(result.payload).not.toHaveProperty("meetingProvider");
       expect(result.payload).not.toHaveProperty("creatorId");
     },
   );

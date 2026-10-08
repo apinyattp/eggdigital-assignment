@@ -63,8 +63,6 @@ const meeting: Meeting = {
   status: "CANCELLED",
   format: "ONSITE",
   location: null,
-  meetingProvider: null,
-  externalMeetingId: null,
   attendees: [
     { memberId: null, displayName: "Guest", email: "guest@example.test" },
   ],
@@ -92,6 +90,19 @@ beforeEach(() => {
   };
 });
 describe("Edit route and team UI with actual draft hook", () => {
+  it.each(["ONSITE", "ONLINE"] as const)("shows %s format without provider metadata", async (format) => {
+    mock.read.mockResolvedValue({ ...meeting, format, status: "CONFIRMED", joinUrl: format === "ONLINE" ? "https://meeting.example.test/room" : null });
+    render(<EditMeetingForm meetingId="meeting" />);
+    const meetingType = await screen.findByLabelText("Meeting type");
+    expect(meetingType).toHaveValue(format === "ONLINE" ? "Online" : "Onsite");
+    expect(meetingType).toBeDisabled();
+    if (format === "ONLINE") {
+      expect(screen.getByLabelText("Meeting link")).toHaveValue("https://meeting.example.test/room");
+    } else {
+      expect(screen.queryByLabelText("Meeting link")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Location (optional)")).toBeInTheDocument();
+    }
+  });
   it("shows one error toast only on invalid Save, preserves field errors after dismiss and does not write", async () => {
     const events = userEvent.setup();
     render(<EditMeetingForm meetingId="meeting" />);

@@ -60,14 +60,8 @@ export type Meeting = {
   createdAt: string;
   updatedAt: string;
   joinUrl?: string | null;
-} & (
-  | { format: "ONSITE"; meetingProvider: null; externalMeetingId: null }
-  | {
-      format: "ONLINE";
-      meetingProvider: "GOOGLE_MEET" | "ZOOM" | null;
-      externalMeetingId: string | null;
-    }
-);
+  format: "ONSITE" | "ONLINE";
+};
 
 export class MeetingError extends Error {
   constructor(
@@ -115,15 +109,7 @@ function parseMeeting(value: unknown, status: number): Meeting {
       meeting.status === "REJECTED" ||
       meeting.status === "CANCELLED"
     ) ||
-    !(meeting.format === "ONSITE"
-      ? meeting.meetingProvider === null && meeting.externalMeetingId === null
-      : meeting.format === "ONLINE" &&
-        ((meeting.meetingProvider === null &&
-          meeting.externalMeetingId === null) ||
-          ((meeting.meetingProvider === "GOOGLE_MEET" ||
-            meeting.meetingProvider === "ZOOM") &&
-            typeof meeting.externalMeetingId === "string" &&
-            meeting.externalMeetingId.length > 0))) ||
+    !(meeting.format === "ONSITE" || meeting.format === "ONLINE") ||
     !Array.isArray(meeting.attendees)
   ) {
     throw invalid();
@@ -145,26 +131,13 @@ function parseMeeting(value: unknown, status: number): Meeting {
   });
   // Keep server timestamps and stored text verbatim. This adapter does not impose
   // date precision, field projection or new business validation on the form.
-  const channel =
-    meeting.format === "ONLINE"
-      ? {
-          format: "ONLINE" as const,
-          meetingProvider: meeting.meetingProvider as
-            "GOOGLE_MEET" | "ZOOM" | null,
-          externalMeetingId: meeting.externalMeetingId as string | null,
-        }
-      : {
-          format: "ONSITE" as const,
-          meetingProvider: null,
-          externalMeetingId: null,
-        };
   return {
-    ...channel,
+    format: meeting.format,
     ...(meeting.joinUrl !== undefined
       ? {
           joinUrl: meetingJoinUrl(
             meeting.joinUrl,
-            channel.format,
+            meeting.format,
             String(meeting.status),
           ),
         }
