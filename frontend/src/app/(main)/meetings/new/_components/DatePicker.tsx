@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import styles from "../date-time-picker.module.css";
 const iso = (date: Date) => date.toISOString().slice(0, 10);
 const label = (date: string) =>
@@ -10,6 +10,12 @@ const label = (date: string) =>
     month: "long",
     day: "numeric",
   });
+const months = Array.from({ length: 12 }, (_, i) =>
+  new Date(Date.UTC(2026, i, 1)).toLocaleDateString("en-GB", {
+    month: "short",
+    timeZone: "UTC",
+  }),
+);
 const shifted = (date: string, days: number) => {
   const value = new Date(`${date}T12:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
@@ -87,12 +93,17 @@ function Calendar({
     yearStart = Math.floor(year / 12) * 12;
   const first = new Date(`${display}T12:00:00Z`),
     monday = shifted(display, -((first.getUTCDay() + 6) % 7));
-  const months = Array.from({ length: 12 }, (_, i) =>
-    new Date(Date.UTC(2026, i, 1)).toLocaleDateString("en-GB", {
-      month: "short",
-      timeZone: "UTC",
-    }),
+  const days = useMemo(
+    () =>
+      view === "day"
+        ? Array.from({ length: 42 }, (_, i) => {
+            const date = shifted(monday, i);
+            return { date, accessibleLabel: label(date) };
+          })
+        : [],
+    [monday, view],
   );
+  const draftLabel = useMemo(() => (draft ? label(draft) : null), [draft]);
   useEffect(() => {
     const element = dialog.current!;
     element.showModal();
@@ -220,31 +231,29 @@ function Calendar({
             role="group"
             aria-label="Choose one date"
           >
-            {Array.from({ length: 42 }, (_, i) => shifted(monday, i)).map(
-              (date) => (
-                <button
-                  key={date}
-                  type="button"
-                  data-date={date}
-                  disabled={date < min}
-                  tabIndex={date === focus ? 0 : -1}
-                  aria-label={label(date)}
-                  aria-pressed={draft === date}
-                  className={
-                    date.slice(5, 7) !== display.slice(5, 7)
-                      ? styles.outside
-                      : undefined
-                  }
-                  onClick={() => {
-                    setDraft(date);
-                    setFocus(date);
-                  }}
-                  onKeyDown={(event) => key(event, date)}
-                >
-                  {Number(date.slice(-2))}
-                </button>
-              ),
-            )}
+            {days.map(({ date, accessibleLabel }) => (
+              <button
+                key={date}
+                type="button"
+                data-date={date}
+                disabled={date < min}
+                tabIndex={date === focus ? 0 : -1}
+                aria-label={accessibleLabel}
+                aria-pressed={draft === date}
+                className={
+                  date.slice(5, 7) !== display.slice(5, 7)
+                    ? styles.outside
+                    : undefined
+                }
+                onClick={() => {
+                  setDraft(date);
+                  setFocus(date);
+                }}
+                onKeyDown={(event) => key(event, date)}
+              >
+                {Number(date.slice(-2))}
+              </button>
+            ))}
           </div>
         </>
       ) : (
@@ -275,7 +284,7 @@ function Calendar({
         </div>
       )}
       <p className={styles.draft} aria-live="polite">
-        {draft ? `Selected: ${label(draft)}` : "No date selected"}
+        {draft ? `Selected: ${draftLabel}` : "No date selected"}
       </p>
       <div className={styles.actions}>
         <button type="button" onClick={onClose}>

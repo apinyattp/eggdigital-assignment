@@ -20,7 +20,8 @@
     "test:e2e": "node tests/e2e/run-local.mjs",
     "test:e2e:local": "node tests/e2e/run-local.mjs",
     "test:e2e:selection": "node --test tests/e2e/selection.test.mjs",
-    "test:member-picker": "node tests/member-picker.browser.mjs"
+    "test:member-picker": "node tests/member-picker.browser.mjs",
+    "test:date-time-picker": "node tests/date-time-picker.browser.mjs"
   },
   "dependencies": {
     "next": "16.4.0",
