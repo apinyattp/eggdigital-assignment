@@ -210,6 +210,42 @@ On failure, the workflow uploads only password-masked PNG screenshots, redacted 
 
 These workflow definitions are not execution evidence by themselves. Inspect the run for the submitted commit and both browser-job conclusions. Required merge checks depend on the repository’s branch-protection settings.
 
+## Native keyboard profile
+
+The pending-create and member-picker keyboard tests select a fixed native navigation
+profile from the host platform and browser **before** interacting with the app:
+
+| Host/browser | Profile | Forward navigation |
+| --- | --- | --- |
+| macOS + Playwright WebKit | `macos-webkit-option-tab` | Option+Tab (`Alt+Tab` in Playwright) |
+| Chromium and the existing non-macOS profiles | `standard-tab` | Tab |
+
+This Mac/WebKit combination skips native links/buttons with plain Tab. The selected
+gesture is explicit; a failed application assertion never switches the profile,
+retries with another key, or repairs focus programmatically. No system or browser
+preferences are changed, and no extra environment configuration is required.
+
+Before the affected scenarios, an isolated native HTML form must prove that the
+selected key reaches a link and enabled submit button, Enter submits once, and the
+next traversal skips a disabled button. A mismatch fails with
+`Native keyboard preflight failed` before application interaction. Inspect the
+reported host/engine/profile and keyboard-navigation configuration; do not bypass
+it with a forced click or by weakening the scenario's focus assertion.
+
+Run profile selection and native-browser preflight regressions independently:
+
+```sh
+PICKER_BROWSERS=chromium,webkit npm --prefix frontend run test:keyboard-profile
+```
+
+These checks cover touch/non-touch contexts, fail-closed behavior for an incompatible
+key, and context cleanup on success/failure. `test:member-picker` runs them first,
+so the existing Frontend CI includes them without workflow changes. The real-stack
+`E2E-CREATE-PENDING` case also runs the preflight using its touch-enabled context
+configuration. Its focus, Enter submission, request-count, disabled-control,
+request-body and persistence assertions remain intact. These preflights are test
+infrastructure coverage, not additional real-stack scenario PASS counts.
+
 ## Evidence scopes
 
 - **Real stack:** Browser interactions use actual local application endpoints and PostgreSQL. Fixture seeding, inspection, membership removal, and issuance of an already-expired token are explicit local test setup actions. They do not add application endpoints or bypass authorization for the actions under test.
@@ -267,7 +303,7 @@ Implemented in [`meetings.browser.mjs`](meetings.browser.mjs) and [`authorizatio
 | `E2E-AUTHZ-02`                           | An outsider cannot read protected meeting/private note data.                                                                                                                             | Real stack                                              |
 | `E2E-AUTHZ-NOTE-01`                      | Forged foreign-author note query/body input is rejected without changing saved notes.                                                                                                    | Real stack                                              |
 
-`E2E-CREATE-PENDING` starts saving with natural Tab navigation and Enter on the enabled Save button. While pending, physical mouse/touch hits and Enter/Space respect native disabled controls; some engines move focus to the document body, so these keys are not claimed to submit an enabled form again. The case proves frontend suppression by counting outbound POSTs before and after release. It does not prove backend concurrent-request idempotency; `E2E-CREATE-RECOVERY` and the backend integration tests cover separate recovery/idempotency contracts. The timing gate is always released and its route removed in `finally`; the suite owns context cleanup.
+`E2E-CREATE-PENDING` starts saving with its verified native keyboard profile and Enter on the enabled Save button. While pending, physical mouse/touch hits and Enter/Space respect native disabled controls; some engines move focus to the document body, so these keys are not claimed to submit an enabled form again. The case proves frontend suppression by counting outbound POSTs before and after release. It does not prove backend concurrent-request idempotency; `E2E-CREATE-RECOVERY` and the backend integration tests cover separate recovery/idempotency contracts. The timing gate is always released and its route removed in `finally`; the suite owns context cleanup.
 
 The application supports feedback create/read/update, with removal when its meeting is deleted. It exposes no standalone feedback-delete action; the suite does not invent one to label the flow “CRUD.”
 
