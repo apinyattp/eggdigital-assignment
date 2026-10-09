@@ -7,6 +7,80 @@ import { loadConfig } from '../src/config/env.js';
 import { TokenService, canonicalEmail } from '../src/services/token.service.js';
 import { GoogleIdentityService } from '../src/integrations/google/google-identity.js';
 import { passwordBody } from '../src/middlewares/validate.middleware.js';
+import { AuthModel } from '../src/models/auth.model.js';
+
+describe('principal database lookup boundary', () => {
+  it.each(['id', 'email'] as const)(
+    'reads the %s principal and candidate flag in one parameterized query without password data',
+    async (column) => {
+      const row = {
+        id: memberId,
+        email: 'sample01@example.test',
+        display_name: 'Sample 01',
+        denied: true,
+      };
+      const query = vi.fn().mockResolvedValue({ rows: [row] });
+      const value = column === 'id' ? memberId : row.email;
+      const result = await new AuthModel({ query } as never).findPrincipal(column, value);
+      expect(result).toEqual({
+        member: { id: row.id, email: row.email, display_name: row.display_name },
+        candidateDenied: true,
+      });
+      expect(query).toHaveBeenCalledExactlyOnceWith(expect.any(String), [value]);
+      const sql = query.mock.calls[0]![0] as string;
+      expect(sql).toContain(`LEFT JOIN users AS member ON member.${column} = $1`);
+      expect(sql).toContain(`candidate_email = ${column === 'id' ? 'member.email' : '$1'}`);
+      expect(sql).not.toContain('password_hash');
+    },
+  );
+  it.each([true, false])(
+    'preserves candidateDenied=%s when the member is missing',
+    async (denied) => {
+      const query = vi.fn().mockResolvedValue({
+        rows: [{ id: null, email: null, display_name: null, denied }],
+      });
+      await expect(
+        new AuthModel({ query } as never).findPrincipal('email', 'candidate@example.test'),
+      ).resolves.toEqual({ member: null, candidateDenied: denied });
+      expect(query).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('maps a principal query failure to dependency unavailable without retrying', async () => {
+    const query = vi.fn().mockRejectedValue(new Error('database failed'));
+    await expect(
+      new AuthModel({ query } as never).findPrincipal('id', memberId),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: 'DEPENDENCY_UNAVAILABLE',
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+  it('keeps password-hash retrieval confined to the separate email lookup', async () => {
+    const member = {
+      id: memberId,
+      email: 'sample01@example.test',
+      display_name: 'Sample 01',
+      password_hash: 'controlled-hash',
+    };
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [member] })
+      .mockResolvedValueOnce({ rows: [] });
+    const model = new AuthModel({ query } as never);
+    await expect(model.findByEmail(member.email)).resolves.toEqual(member);
+    await expect(model.findByEmail('missing@example.test')).resolves.toBeNull();
+    expect(query).toHaveBeenNthCalledWith(
+      1,
+      'SELECT id,email,display_name,password_hash FROM users WHERE email = $1',
+      [member.email],
+    );
+    expect(query).toHaveBeenNthCalledWith(
+      2,
+      'SELECT id,email,display_name,password_hash FROM users WHERE email = $1',
+      ['missing@example.test'],
+    );
+  });
+});
 
 describe('TEST-MM-007/008 normalization and password', () => {
   it('normalizes case/edges without collapsing dots or plus aliases', () => {
