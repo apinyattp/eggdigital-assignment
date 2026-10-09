@@ -651,113 +651,20 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN');
-      const identity = (
-        await client.query<{ create_request_id: string }>(
-          'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
-          [creatorId, meetingId],
-        )
-      ).rows[0];
-      if (!identity) {
-        throw new ApiError(404, 'MEETING_NOT_FOUND');
-      }
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        creatorId + ':' + identity.create_request_id,
-      ]);
-      const locked = await client.query(
-        `SELECT id, updated_at=$3::timestamptz AS matches,
-         (SELECT email FROM users WHERE id=creator_id) AS creator_email
-         FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE`,
-        [creatorId, meetingId, input.expectedUpdatedAt],
+      const locked = await this.lockEditableMeeting(
+        client,
+        creatorId,
+        meetingId,
+        input.expectedUpdatedAt,
       );
-      if (!locked.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      if (!locked.rows[0].matches) throw new ApiError(409, 'STALE_MEETING');
-      let changed = false;
-      if (input.attendeeChanges) {
-        const changes = input.attendeeChanges;
-        const current = (
-          await client.query<{ email: string; member_id: string | null }>(
-            'SELECT email,member_id FROM meeting_attendees WHERE meeting_id=$1 ORDER BY email',
-            [meetingId],
-          )
-        ).rows;
-        const members = (
-          await client.query<{ id: string; email: string; display_name: string }>(
-            'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
-            [changes.addMemberIds],
-          )
-        ).rows;
-        if (members.length !== changes.addMemberIds.length)
-          throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'ไม่พบสมาชิกที่เลือก' });
-        if (changes.removeEmails.some((email) => !current.some((a) => a.email === email)))
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            removeEmails: 'ไม่พบผู้ร่วมที่เลือกเอาออก',
-          });
-        if (
-          members.some(
-            (m) =>
-              changes.removeEmails.includes(m.email) ||
-              current.some((a) => a.member_id === m.id && changes.removeEmails.includes(a.email)),
-          )
-        )
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            attendeeChanges: 'ไม่สามารถเพิ่มและนำสมาชิกเดียวกันออกพร้อมกัน',
-          });
-        const retained = current.filter((a) => !changes.removeEmails.includes(a.email));
-        const additions = members.filter((m) => !retained.some((a) => a.member_id === m.id));
-        if (additions.some((m) => retained.some((a) => a.email === m.email)))
-          throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'มีอีเมลนี้ในทีมแล้ว' });
-        if (
-          !retained.some((a) =>
-            a.member_id !== null
-              ? a.member_id !== creatorId
-              : a.email !== locked.rows[0].creator_email,
-          ) &&
-          !additions.some((m) => m.id !== creatorId)
-        )
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            attendeeChanges: 'เลือกสมาชิกอื่นอย่างน้อยหนึ่งคน',
-          });
-        if (changes.removeEmails.length) {
-          await client.query(
-            'DELETE FROM meeting_attendees WHERE meeting_id=$1 AND email=ANY($2::text[])',
-            [meetingId, changes.removeEmails],
-          );
-          changed = true;
-        }
-        if (additions.length) {
-          await this.insertAttendees(client, meetingId, additions);
-          changed = true;
-        }
-      }
-      const columns = {
-        title: 'title',
-        description: 'description',
-        preparationNotes: 'preparation_notes',
-        candidateName: 'candidate_name',
-        candidateEmail: 'candidate_email',
-        position: 'position',
-        location: 'location',
-        joinUrl: 'manual_join_url',
-        status: 'status',
-      } as const;
-      const values: unknown[] = [meetingId];
-      const sets: string[] = [],
-        differences: string[] = [];
-      for (const [key, column] of Object.entries(columns)) {
-        const value = input[key as keyof typeof columns];
-        if (value === undefined) continue;
-        values.push(value);
-        sets.push(`${column}=$${values.length}`);
-        differences.push(`${column} IS DISTINCT FROM $${values.length}`);
-      }
-      if (sets.length || changed) {
-        await client.query(
-          `UPDATE meetings SET ${sets.length ? sets.join(',') + ',' : ''}
-          updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
-          WHERE id=$1 AND (${changed ? 'true' : differences.join(' OR ')})`,
-          values,
-        );
-      }
+      const changed = await this.applyAttendeeChanges(
+        client,
+        creatorId,
+        meetingId,
+        locked.creator_email,
+        input.attendeeChanges,
+      );
+      await this.updateMeetingFields(client, meetingId, input, changed);
       const meeting = await this.find('id', creatorId, meetingId, client);
       if (!meeting) throw unavailable();
       commitStarted = true;
@@ -775,6 +682,134 @@ export class MeetingModel {
       throw unavailable();
     } finally {
       client.release(discard);
+    }
+  }
+  private async lockEditableMeeting(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    expectedUpdatedAt: string,
+  ): Promise<{ creator_email: string }> {
+    const identity = (
+      await client.query<{ create_request_id: string }>(
+        'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+        [creatorId, meetingId],
+      )
+    ).rows[0];
+    if (!identity) {
+      throw new ApiError(404, 'MEETING_NOT_FOUND');
+    }
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      creatorId + ':' + identity.create_request_id,
+    ]);
+    const locked = await client.query(
+      `SELECT id, updated_at=$3::timestamptz AS matches,
+       (SELECT email FROM users WHERE id=creator_id) AS creator_email
+       FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE`,
+      [creatorId, meetingId, expectedUpdatedAt],
+    );
+    if (!locked.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    if (!locked.rows[0].matches) throw new ApiError(409, 'STALE_MEETING');
+    return locked.rows[0];
+  }
+  private async applyAttendeeChanges(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    creatorEmail: string,
+    changes: MeetingMutation['attendeeChanges'],
+  ): Promise<boolean> {
+    let changed = false;
+    if (changes) {
+      const current = (
+        await client.query<{ email: string; member_id: string | null }>(
+          'SELECT email,member_id FROM meeting_attendees WHERE meeting_id=$1 ORDER BY email',
+          [meetingId],
+        )
+      ).rows;
+      const members = (
+        await client.query<{ id: string; email: string; display_name: string }>(
+          'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
+          [changes.addMemberIds],
+        )
+      ).rows;
+      if (members.length !== changes.addMemberIds.length)
+        throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'ไม่พบสมาชิกที่เลือก' });
+      if (changes.removeEmails.some((email) => !current.some((a) => a.email === email)))
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          removeEmails: 'ไม่พบผู้ร่วมที่เลือกเอาออก',
+        });
+      if (
+        members.some(
+          (m) =>
+            changes.removeEmails.includes(m.email) ||
+            current.some((a) => a.member_id === m.id && changes.removeEmails.includes(a.email)),
+        )
+      )
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          attendeeChanges: 'ไม่สามารถเพิ่มและนำสมาชิกเดียวกันออกพร้อมกัน',
+        });
+      const retained = current.filter((a) => !changes.removeEmails.includes(a.email));
+      const additions = members.filter((m) => !retained.some((a) => a.member_id === m.id));
+      if (additions.some((m) => retained.some((a) => a.email === m.email)))
+        throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'มีอีเมลนี้ในทีมแล้ว' });
+      if (
+        !retained.some((a) =>
+          a.member_id !== null ? a.member_id !== creatorId : a.email !== creatorEmail,
+        ) &&
+        !additions.some((m) => m.id !== creatorId)
+      )
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          attendeeChanges: 'เลือกสมาชิกอื่นอย่างน้อยหนึ่งคน',
+        });
+      if (changes.removeEmails.length) {
+        await client.query(
+          'DELETE FROM meeting_attendees WHERE meeting_id=$1 AND email=ANY($2::text[])',
+          [meetingId, changes.removeEmails],
+        );
+        changed = true;
+      }
+      if (additions.length) {
+        await this.insertAttendees(client, meetingId, additions);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+  private async updateMeetingFields(
+    client: PoolClient,
+    meetingId: string,
+    input: MeetingMutation,
+    changed: boolean,
+  ): Promise<void> {
+    const columns = {
+      title: 'title',
+      description: 'description',
+      preparationNotes: 'preparation_notes',
+      candidateName: 'candidate_name',
+      candidateEmail: 'candidate_email',
+      position: 'position',
+      location: 'location',
+      joinUrl: 'manual_join_url',
+      status: 'status',
+    } as const;
+    const values: unknown[] = [meetingId];
+    const sets: string[] = [],
+      differences: string[] = [];
+    for (const [key, column] of Object.entries(columns)) {
+      const value = input[key as keyof typeof columns];
+      if (value === undefined) continue;
+      values.push(value);
+      sets.push(`${column}=$${values.length}`);
+      differences.push(`${column} IS DISTINCT FROM $${values.length}`);
+    }
+    if (sets.length || changed) {
+      await client.query(
+        `UPDATE meetings SET ${sets.length ? sets.join(',') + ',' : ''}
+        updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
+        WHERE id=$1 AND (${changed ? 'true' : differences.join(' OR ')})`,
+        values,
+      );
     }
   }
   private async insertAttendees(
