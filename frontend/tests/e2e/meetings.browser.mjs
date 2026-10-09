@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import {
+  nativeKeyboardProfile,
+  verifyNativeKeyboard,
+} from "../native-keyboard.mjs";
 import { runSuite, login, check, chooseDate } from "./helpers.mjs";
 import { inspectFixture } from "./fixture.mjs";
 
@@ -275,7 +279,11 @@ await runSuite("meetings", async ({ run }) => {
 
   await run(
     "E2E-CREATE-PENDING",
-    async ({ page, fixture, origin }) => {
+    async ({ browser, page, fixture, origin }) => {
+      const keyboard = nativeKeyboardProfile(
+        process.env.PLAYWRIGHT_BROWSER ?? "chromium",
+      );
+      await verifyNativeKeyboard(browser, keyboard, { hasTouch: true });
       await login(page, fixture.accounts.owner);
       await page.goto(`${origin}/meetings/new`);
       await fillMeeting(page, fixture, "E2E pending create");
@@ -327,7 +335,7 @@ await runSuite("meetings", async ({ run }) => {
         // saving. Once locked, native disabled controls cannot be focused again.
         await page
           .getByLabel("Preparation Notes", { exact: true })
-          .press("Tab");
+          .press(keyboard.nextKey);
         const save = page.getByRole("button", {
           name: "Save Meeting",
           exact: true,
@@ -335,8 +343,12 @@ await runSuite("meetings", async ({ run }) => {
         const saveFocused = () =>
           save.evaluate((button) => button === document.activeElement);
         for (let tab = 1; tab < 6 && !(await saveFocused()); tab++)
-          await page.keyboard.press("Tab");
-        assert.equal(await saveFocused(), true, "Native Tab reaches Save");
+          await page.keyboard.press(keyboard.nextKey);
+        assert.equal(
+          await saveFocused(),
+          true,
+          "Native keyboard traversal reaches Save",
+        );
         await page.keyboard.press("Enter");
         const pending = page.getByRole("button", {
           name: "Saving…",

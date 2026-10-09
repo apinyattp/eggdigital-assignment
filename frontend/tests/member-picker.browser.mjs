@@ -1,6 +1,10 @@
 // Actual production forms with controlled synthetic API responses, not backend E2E.
 import assert from "node:assert/strict";
 import { chromium, webkit } from "playwright";
+import {
+  nativeKeyboardProfile,
+  verifyNativeKeyboard,
+} from "./native-keyboard.mjs";
 
 const origin = process.env.FE_TEST_ORIGIN ?? "http://127.0.0.1:3100";
 assert.ok(["localhost", "127.0.0.1"].includes(new URL(origin).hostname));
@@ -72,6 +76,8 @@ for (const engine of engines) {
       : {}),
   });
   try {
+    const keyboard = nativeKeyboardProfile(engine);
+    await verifyNativeKeyboard(browser, keyboard);
     for (const view of ["create", "edit"]) {
       for (const mode of [
         "mouse",
@@ -260,11 +266,11 @@ for (const engine of engines) {
             const gate = deferred();
             gates.set(number, gate);
             if (mode === "keyboard") {
-              await page.keyboard.press("Tab");
+              await page.keyboard.press(keyboard.nextKey);
               assert.equal(
                 await loadMore.count(),
                 1,
-                "Natural Tab keeps Load more reachable",
+                "Native keyboard traversal keeps Load more reachable",
               );
               assert.equal(await search.getAttribute("aria-expanded"), "true");
               // Chromium may include the scrollable listbox in native tab order.
@@ -273,13 +279,13 @@ for (const engine of engines) {
                   .getByRole("listbox", { name: "Company members" })
                   .evaluate((listbox) => document.activeElement === listbox)
               )
-                await page.keyboard.press("Tab");
+                await page.keyboard.press(keyboard.nextKey);
               assert.equal(
                 await loadMore.evaluate(
                   (button) => document.activeElement === button,
                 ),
                 true,
-                "Natural Tab reaches Load more",
+                "Native keyboard traversal reaches Load more",
               );
               await page.keyboard.press(number === 2 ? "Enter" : "Space");
             } else if (mode === "touch") await loadMore.tap();
