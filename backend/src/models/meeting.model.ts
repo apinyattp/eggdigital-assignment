@@ -113,38 +113,10 @@ export class MeetingModel {
         return { created: false, meeting: existing };
       }
 
-      const members = (
-        await client.query<{ id: string; email: string; display_name: string }>(
-          'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
-          [input.attendeeMemberIds],
-        )
-      ).rows;
-      if (members.length !== input.attendeeMemberIds.length)
-        throw new ApiError(400, 'VALIDATION_ERROR', { attendeeMemberIds: 'ไม่พบสมาชิกที่เลือก' });
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,manual_join_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id`,
-        [
-          randomUUID(),
-          creatorId,
-          input.requestId,
-          input.title,
-          input.description,
-          input.candidateName,
-          input.candidateEmail,
-          input.position,
-          input.startsAt,
-          input.endsAt,
-          input.status,
-          input.format,
-          input.location,
-          input.preparationNotes,
-          input.joinUrl ?? null,
-        ],
-      );
-      const created = inserted.rows.length === 1;
-      if (created) await this.insertAttendees(client, inserted.rows[0]!.id, members);
+      const members = await this.lockCreateAttendees(client, input.attendeeMemberIds);
+      const inserted = await this.insertMeeting(client, creatorId, input);
+      const created = inserted.length === 1;
+      if (created) await this.insertAttendees(client, inserted[0]!.id, members);
       // The next READ COMMITTED statement sees a concurrent committed winner.
       const meeting = await this.find('create_request_id', creatorId, input.requestId, client);
       if (!meeting) throw unavailable();
@@ -168,6 +140,42 @@ export class MeetingModel {
       client.release(discardClient);
     }
   }
+  private async lockCreateAttendees(client: PoolClient, attendeeMemberIds: string[]) {
+    const members = (
+      await client.query<{ id: string; email: string; display_name: string }>(
+        'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
+        [attendeeMemberIds],
+      )
+    ).rows;
+    if (members.length !== attendeeMemberIds.length)
+      throw new ApiError(400, 'VALIDATION_ERROR', { attendeeMemberIds: 'ไม่พบสมาชิกที่เลือก' });
+    return members;
+  }
+  private async insertMeeting(client: PoolClient, creatorId: string, input: NewMeeting) {
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,manual_join_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id`,
+      [
+        randomUUID(),
+        creatorId,
+        input.requestId,
+        input.title,
+        input.description,
+        input.candidateName,
+        input.candidateEmail,
+        input.position,
+        input.startsAt,
+        input.endsAt,
+        input.status,
+        input.format,
+        input.location,
+        input.preparationNotes,
+        input.joinUrl ?? null,
+      ],
+    );
+    return inserted.rows;
+  }
   async deleteMeeting(
     creatorId: string,
     meetingId: string,
@@ -183,34 +191,13 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN');
-      // Read identity first, then take operation-key -> row locks in the same order as create.
-      const found = (
-        await client.query<{ create_request_id: string }>(
-          'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
-          [creatorId, meetingId],
-        )
-      ).rows[0];
-      if (!found) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        creatorId + ':' + found.create_request_id,
-      ]);
-      const locked = (
-        await client.query(
-          'SELECT updated_at=$3::timestamptz AS matches FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE',
-          [creatorId, meetingId, expectedUpdatedAt],
-        )
-      ).rows[0];
-      if (!locked) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      if (!locked.matches) throw new ApiError(409, 'STALE_MEETING');
-      await client.query(
-        'INSERT INTO deleted_meeting_requests(creator_id,create_request_id,meeting_id) VALUES($1,$2,$3)',
-        [creatorId, found.create_request_id, meetingId],
-      );
-      await client.query('DELETE FROM meeting_attendees WHERE meeting_id=$1', [meetingId]);
-      await client.query('DELETE FROM meetings WHERE id=$1 AND creator_id=$2', [
-        meetingId,
+      const requestId = await this.lockMeetingForDeletion(
+        client,
         creatorId,
-      ]);
+        meetingId,
+        expectedUpdatedAt,
+      );
+      await this.deleteMeetingRows(client, creatorId, meetingId, requestId);
       commitStarted = true;
       await client.query('COMMIT');
     } catch (error) {
@@ -226,6 +213,49 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async lockMeetingForDeletion(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    expectedUpdatedAt: string,
+  ): Promise<string> {
+    // Read identity first, then take operation-key -> row locks in the same order as create.
+    const found = (
+      await client.query<{ create_request_id: string }>(
+        'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+        [creatorId, meetingId],
+      )
+    ).rows[0];
+    if (!found) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      creatorId + ':' + found.create_request_id,
+    ]);
+    const locked = (
+      await client.query(
+        'SELECT updated_at=$3::timestamptz AS matches FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE',
+        [creatorId, meetingId, expectedUpdatedAt],
+      )
+    ).rows[0];
+    if (!locked) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    if (!locked.matches) throw new ApiError(409, 'STALE_MEETING');
+    return found.create_request_id;
+  }
+  private async deleteMeetingRows(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    requestId: string,
+  ): Promise<void> {
+    await client.query(
+      'INSERT INTO deleted_meeting_requests(creator_id,create_request_id,meeting_id) VALUES($1,$2,$3)',
+      [creatorId, requestId, meetingId],
+    );
+    await client.query('DELETE FROM meeting_attendees WHERE meeting_id=$1', [meetingId]);
+    await client.query('DELETE FROM meetings WHERE id=$1 AND creator_id=$2', [
+      meetingId,
+      creatorId,
+    ]);
   }
   async getOwnNote(user: UserView, meetingId: string, authorKey: string): Promise<NoteView | null> {
     try {
@@ -274,31 +304,20 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const existing = (
-        await client.query(
-          `SELECT content,updated_at=$3::timestamptz AS matches FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
-          [meetingId, authorKey, expectedUpdatedAt],
-        )
-      ).rows[0];
+      const existing = await this.readOwnNoteVersion(
+        client,
+        meetingId,
+        authorKey,
+        expectedUpdatedAt,
+      );
       if (!existing) {
         if (expectedUpdatedAt !== null) throw new ApiError(409, 'NOTE_CHANGED');
-        await client.query(
-          'INSERT INTO interview_notes(meeting_id,author_key,content) VALUES($1,$2,$3)',
-          [meetingId, authorKey, text],
-        );
+        await this.insertOwnNote(client, meetingId, authorKey, text);
       } else if (existing.content !== text) {
         if (!existing.matches) throw new ApiError(409, 'NOTE_CHANGED');
-        await client.query(
-          "UPDATE interview_notes SET content=$3,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2",
-          [meetingId, authorKey, text],
-        );
+        await this.updateOwnNote(client, meetingId, authorKey, text);
       }
-      const note = (
-        await client.query<NoteView>(
-          `SELECT content AS text,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt" FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
-          [meetingId, authorKey],
-        )
-      ).rows[0]!;
+      const note = await this.readSavedOwnNote(client, meetingId, authorKey);
       commitStarted = true;
       await client.query('COMMIT');
       return note;
@@ -315,6 +334,49 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async readOwnNoteVersion(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    expectedUpdatedAt: string | null,
+  ) {
+    return (
+      await client.query(
+        `SELECT content,updated_at=$3::timestamptz AS matches FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
+        [meetingId, authorKey, expectedUpdatedAt],
+      )
+    ).rows[0];
+  }
+  private async insertOwnNote(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    text: string,
+  ) {
+    await client.query(
+      'INSERT INTO interview_notes(meeting_id,author_key,content) VALUES($1,$2,$3)',
+      [meetingId, authorKey, text],
+    );
+  }
+  private async updateOwnNote(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    text: string,
+  ) {
+    await client.query(
+      "UPDATE interview_notes SET content=$3,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2",
+      [meetingId, authorKey, text],
+    );
+  }
+  private async readSavedOwnNote(client: PoolClient, meetingId: string, authorKey: string) {
+    return (
+      await client.query<NoteView>(
+        `SELECT content AS text,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt" FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
+        [meetingId, authorKey],
+      )
+    ).rows[0]!;
   }
   async readFeedback(
     user: UserView,
@@ -333,42 +395,17 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const access = await client.query(
-        `SELECT m.id FROM meetings m WHERE m.id=$3 AND ${this.readPredicate()}`,
-        [user.id, user.email, meetingId],
+      await this.authorizeFeedbackRead(client, user, meetingId);
+      const page = await this.readFeedbackPage(
+        client,
+        meetingId,
+        authorKey,
+        pageSize,
+        offset,
+        previousAsOf,
       );
-      if (!access.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      const own = (
-        await client.query<{ id: string }>(
-          'SELECT id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
-          [meetingId, authorKey],
-        )
-      ).rows[0];
-      const asOf =
-        previousAsOf ??
-        ((
-          await client.query(
-            `SELECT to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS time`,
-          )
-        ).rows[0].time as string);
-      const visibility = `meeting_id=$1 AND created_at <= $3::timestamptz`;
-      const parameters = [meetingId, authorKey, asOf];
-      const total = Number(
-        (
-          await client.query(
-            `SELECT count(*) AS total FROM meeting_feedback WHERE meeting_id=$1 AND created_at <= $2::timestamptz`,
-            [meetingId, asOf],
-          )
-        ).rows[0].total,
-      );
-      const rows = (
-        await client.query<FeedbackView>(
-          `${feedbackProjection} WHERE ${visibility} ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`,
-          [...parameters, pageSize, offset],
-        )
-      ).rows;
       await client.query('COMMIT');
-      return { rows, ownFeedbackId: own?.id ?? null, total, asOf };
+      return page;
     } catch (error) {
       try {
         await client.query('ROLLBACK');
@@ -399,12 +436,7 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const own = (
-        await client.query<{ id: string; create_request_id: string }>(
-          'SELECT id,create_request_id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
-          [meetingId, authorKey],
-        )
-      ).rows[0];
+      const own = await this.findFeedbackRequest(client, meetingId, authorKey);
       let id: string,
         created = false;
       if (own) {
@@ -415,18 +447,17 @@ export class MeetingModel {
         const text = validateNewContent();
         id = randomUUID();
         created = true;
-        await client.query(
-          'INSERT INTO meeting_feedback(id,meeting_id,author_key,author_name,create_request_id,content) VALUES($1,$2,$3,$4,$5,$6)',
-          [id, meetingId, authorKey, user.displayName, requestId, text],
-        );
-      }
-      const feedback = (
-        await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
+        await this.insertFeedback(
+          client,
+          id,
           meetingId,
           authorKey,
-          id,
-        ])
-      ).rows[0]!;
+          user.displayName,
+          requestId,
+          text,
+        );
+      }
+      const feedback = await this.readFeedbackById(client, meetingId, authorKey, id);
       commitStarted = true;
       await client.query('COMMIT');
       return { created, feedback };
@@ -463,27 +494,19 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const own = (
-        await client.query(
-          `SELECT content,updated_at=$4::timestamptz AS matches FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2 AND id=$3`,
-          [meetingId, authorKey, feedbackId, expectedUpdatedAt],
-        )
-      ).rows[0];
+      const own = await this.readEditableFeedback(
+        client,
+        meetingId,
+        authorKey,
+        feedbackId,
+        expectedUpdatedAt,
+      );
       if (!own) throw new ApiError(404, 'FEEDBACK_NOT_FOUND');
       if (own.content !== text) {
         if (!own.matches) throw new ApiError(409, 'FEEDBACK_CHANGED');
-        await client.query(
-          "UPDATE meeting_feedback SET content=$4,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2 AND id=$3",
-          [meetingId, authorKey, feedbackId, text],
-        );
+        await this.updateFeedbackContent(client, meetingId, authorKey, feedbackId, text);
       }
-      const feedback = (
-        await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
-          meetingId,
-          authorKey,
-          feedbackId,
-        ])
-      ).rows[0]!;
+      const feedback = await this.readFeedbackById(client, meetingId, authorKey, feedbackId);
       commitStarted = true;
       await client.query('COMMIT');
       return feedback;
@@ -500,6 +523,118 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async authorizeFeedbackRead(
+    client: PoolClient,
+    user: UserView,
+    meetingId: string,
+  ): Promise<void> {
+    const access = await client.query(
+      `SELECT m.id FROM meetings m WHERE m.id=$3 AND ${this.readPredicate()}`,
+      [user.id, user.email, meetingId],
+    );
+    if (!access.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
+  }
+  private async readFeedbackPage(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    pageSize: number,
+    offset: number,
+    previousAsOf?: string,
+  ) {
+    const own = (
+      await client.query<{ id: string }>(
+        'SELECT id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
+        [meetingId, authorKey],
+      )
+    ).rows[0];
+    const asOf =
+      previousAsOf ??
+      ((
+        await client.query(
+          `SELECT to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS time`,
+        )
+      ).rows[0].time as string);
+    const visibility = `meeting_id=$1 AND created_at <= $3::timestamptz`;
+    const parameters = [meetingId, authorKey, asOf];
+    const total = Number(
+      (
+        await client.query(
+          `SELECT count(*) AS total FROM meeting_feedback WHERE meeting_id=$1 AND created_at <= $2::timestamptz`,
+          [meetingId, asOf],
+        )
+      ).rows[0].total,
+    );
+    const rows = (
+      await client.query<FeedbackView>(
+        `${feedbackProjection} WHERE ${visibility} ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`,
+        [...parameters, pageSize, offset],
+      )
+    ).rows;
+    return { rows, ownFeedbackId: own?.id ?? null, total, asOf };
+  }
+  private async findFeedbackRequest(client: PoolClient, meetingId: string, authorKey: string) {
+    return (
+      await client.query<{ id: string; create_request_id: string }>(
+        'SELECT id,create_request_id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
+        [meetingId, authorKey],
+      )
+    ).rows[0];
+  }
+  private async insertFeedback(
+    client: PoolClient,
+    id: string,
+    meetingId: string,
+    authorKey: string,
+    authorName: string,
+    requestId: string,
+    text: string,
+  ): Promise<void> {
+    await client.query(
+      'INSERT INTO meeting_feedback(id,meeting_id,author_key,author_name,create_request_id,content) VALUES($1,$2,$3,$4,$5,$6)',
+      [id, meetingId, authorKey, authorName, requestId, text],
+    );
+  }
+  private async readEditableFeedback(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    feedbackId: string,
+    expectedUpdatedAt: string,
+  ) {
+    return (
+      await client.query<{ content: string; matches: boolean }>(
+        `SELECT content,updated_at=$4::timestamptz AS matches FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2 AND id=$3`,
+        [meetingId, authorKey, feedbackId, expectedUpdatedAt],
+      )
+    ).rows[0];
+  }
+  private async updateFeedbackContent(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    feedbackId: string,
+    text: string,
+  ): Promise<void> {
+    await client.query(
+      "UPDATE meeting_feedback SET content=$4,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2 AND id=$3",
+      [meetingId, authorKey, feedbackId, text],
+    );
+  }
+  private async readFeedbackById(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    id: string,
+  ): Promise<FeedbackView> {
+    return (
+      await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
+        meetingId,
+        authorKey,
+        id,
+      ])
+    ).rows[0]!;
   }
   async findSummary(user: UserView, meetingId: string) {
     try {
@@ -541,52 +676,19 @@ export class MeetingModel {
       const scope = `${this.readPredicate()}
         AND m.starts_at >= ($3::date::timestamp AT TIME ZONE 'Asia/Bangkok')
         AND m.starts_at < (($3::date+1)::timestamp AT TIME ZONE 'Asia/Bangkok')`;
-      // PostgreSQL returns only counts and one digest for change detection, never the full dataset.
-      // Current-time grouping in the digest detects meetings crossing their end boundary.
-      const evidence = (
-        await client.query(
-          `WITH scoped AS (
-          ${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer,
-          CASE WHEN m.status IN ('REJECTED','CANCELLED') THEN 'rejectedCancelled'
-            WHEN m.ends_at > $4::timestamptz THEN 'upcomingCurrent' ELSE 'past' END AS section
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-        ) SELECT count(*) FILTER (WHERE section='upcomingCurrent') AS current_total,
-          count(*) FILTER (WHERE section='rejectedCancelled') AS rejected_total,
-          count(*) FILTER (WHERE section='past') AS past_total,
-          md5(COALESCE(string_agg(row_to_json(scoped)::text, '' ORDER BY id),'')) AS fingerprint FROM scoped`,
-          [user.id, user.email, date, currentTime],
-        )
-      ).rows[0];
-      const upcoming = (
-        await client.query(
-          `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at > $4::timestamptz
-          ORDER BY m.starts_at,m.id LIMIT $5 OFFSET $6`,
-          [user.id, user.email, date, referenceTime, pageSize, offset],
-        )
-      ).rows;
-      const rejected = currentOnly
-        ? []
-        : (
-            await client.query(
-              `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status IN ('REJECTED','CANCELLED') ORDER BY m.ends_at DESC,m.id LIMIT $4`,
-              [user.id, user.email, date, 5],
-            )
-          ).rows;
-      const past = currentOnly
-        ? []
-        : (
-            await client.query(
-              `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at <= $4::timestamptz
-          ORDER BY m.ends_at DESC,m.id LIMIT $5`,
-              [user.id, user.email, date, referenceTime, 5],
-            )
-          ).rows;
+      const evidence = await this.readSnapshotEvidence(client, user, date, scope, currentTime);
+      const upcoming = await this.readSnapshotCurrentPage(
+        client,
+        user,
+        date,
+        scope,
+        referenceTime,
+        pageSize,
+        offset,
+      );
+      const { rejected, past } = currentOnly
+        ? { rejected: [], past: [] }
+        : await this.readSnapshotPreviews(client, user, date, scope, referenceTime);
       await client.query('COMMIT');
       return {
         referenceTime,
@@ -616,6 +718,75 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async readSnapshotEvidence(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    currentTime: string,
+  ) {
+    // PostgreSQL returns only counts and one digest for change detection, never the full dataset.
+    // Current-time grouping in the digest detects meetings crossing their end boundary.
+    return (
+      await client.query(
+        `WITH scoped AS (
+          ${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer,
+          CASE WHEN m.status IN ('REJECTED','CANCELLED') THEN 'rejectedCancelled'
+            WHEN m.ends_at > $4::timestamptz THEN 'upcomingCurrent' ELSE 'past' END AS section
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+        ) SELECT count(*) FILTER (WHERE section='upcomingCurrent') AS current_total,
+          count(*) FILTER (WHERE section='rejectedCancelled') AS rejected_total,
+          count(*) FILTER (WHERE section='past') AS past_total,
+          md5(COALESCE(string_agg(row_to_json(scoped)::text, '' ORDER BY id),'')) AS fingerprint FROM scoped`,
+        [user.id, user.email, date, currentTime],
+      )
+    ).rows[0];
+  }
+  private async readSnapshotCurrentPage(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    referenceTime: string,
+    pageSize: number,
+    offset: number,
+  ) {
+    return (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at > $4::timestamptz
+          ORDER BY m.starts_at,m.id LIMIT $5 OFFSET $6`,
+        [user.id, user.email, date, referenceTime, pageSize, offset],
+      )
+    ).rows;
+  }
+  private async readSnapshotPreviews(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    referenceTime: string,
+  ) {
+    const rejected = (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status IN ('REJECTED','CANCELLED') ORDER BY m.ends_at DESC,m.id LIMIT $4`,
+        [user.id, user.email, date, 5],
+      )
+    ).rows;
+    const past = (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at <= $4::timestamptz
+          ORDER BY m.ends_at DESC,m.id LIMIT $5`,
+        [user.id, user.email, date, referenceTime, 5],
+      )
+    ).rows;
+    return { rejected, past };
   }
   private readPredicate() {
     return `(m.creator_id=$1 OR EXISTS(SELECT 1 FROM meeting_attendees a WHERE a.meeting_id=m.id AND
@@ -651,113 +822,20 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN');
-      const identity = (
-        await client.query<{ create_request_id: string }>(
-          'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
-          [creatorId, meetingId],
-        )
-      ).rows[0];
-      if (!identity) {
-        throw new ApiError(404, 'MEETING_NOT_FOUND');
-      }
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        creatorId + ':' + identity.create_request_id,
-      ]);
-      const locked = await client.query(
-        `SELECT id, updated_at=$3::timestamptz AS matches,
-         (SELECT email FROM users WHERE id=creator_id) AS creator_email
-         FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE`,
-        [creatorId, meetingId, input.expectedUpdatedAt],
+      const locked = await this.lockEditableMeeting(
+        client,
+        creatorId,
+        meetingId,
+        input.expectedUpdatedAt,
       );
-      if (!locked.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      if (!locked.rows[0].matches) throw new ApiError(409, 'STALE_MEETING');
-      let changed = false;
-      if (input.attendeeChanges) {
-        const changes = input.attendeeChanges;
-        const current = (
-          await client.query<{ email: string; member_id: string | null }>(
-            'SELECT email,member_id FROM meeting_attendees WHERE meeting_id=$1 ORDER BY email',
-            [meetingId],
-          )
-        ).rows;
-        const members = (
-          await client.query<{ id: string; email: string; display_name: string }>(
-            'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
-            [changes.addMemberIds],
-          )
-        ).rows;
-        if (members.length !== changes.addMemberIds.length)
-          throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'ไม่พบสมาชิกที่เลือก' });
-        if (changes.removeEmails.some((email) => !current.some((a) => a.email === email)))
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            removeEmails: 'ไม่พบผู้ร่วมที่เลือกเอาออก',
-          });
-        if (
-          members.some(
-            (m) =>
-              changes.removeEmails.includes(m.email) ||
-              current.some((a) => a.member_id === m.id && changes.removeEmails.includes(a.email)),
-          )
-        )
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            attendeeChanges: 'ไม่สามารถเพิ่มและนำสมาชิกเดียวกันออกพร้อมกัน',
-          });
-        const retained = current.filter((a) => !changes.removeEmails.includes(a.email));
-        const additions = members.filter((m) => !retained.some((a) => a.member_id === m.id));
-        if (additions.some((m) => retained.some((a) => a.email === m.email)))
-          throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'มีอีเมลนี้ในทีมแล้ว' });
-        if (
-          !retained.some((a) =>
-            a.member_id !== null
-              ? a.member_id !== creatorId
-              : a.email !== locked.rows[0].creator_email,
-          ) &&
-          !additions.some((m) => m.id !== creatorId)
-        )
-          throw new ApiError(400, 'VALIDATION_ERROR', {
-            attendeeChanges: 'เลือกสมาชิกอื่นอย่างน้อยหนึ่งคน',
-          });
-        if (changes.removeEmails.length) {
-          await client.query(
-            'DELETE FROM meeting_attendees WHERE meeting_id=$1 AND email=ANY($2::text[])',
-            [meetingId, changes.removeEmails],
-          );
-          changed = true;
-        }
-        if (additions.length) {
-          await this.insertAttendees(client, meetingId, additions);
-          changed = true;
-        }
-      }
-      const columns = {
-        title: 'title',
-        description: 'description',
-        preparationNotes: 'preparation_notes',
-        candidateName: 'candidate_name',
-        candidateEmail: 'candidate_email',
-        position: 'position',
-        location: 'location',
-        joinUrl: 'manual_join_url',
-        status: 'status',
-      } as const;
-      const values: unknown[] = [meetingId];
-      const sets: string[] = [],
-        differences: string[] = [];
-      for (const [key, column] of Object.entries(columns)) {
-        const value = input[key as keyof typeof columns];
-        if (value === undefined) continue;
-        values.push(value);
-        sets.push(`${column}=$${values.length}`);
-        differences.push(`${column} IS DISTINCT FROM $${values.length}`);
-      }
-      if (sets.length || changed) {
-        await client.query(
-          `UPDATE meetings SET ${sets.length ? sets.join(',') + ',' : ''}
-          updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
-          WHERE id=$1 AND (${changed ? 'true' : differences.join(' OR ')})`,
-          values,
-        );
-      }
+      const changed = await this.applyAttendeeChanges(
+        client,
+        creatorId,
+        meetingId,
+        locked.creator_email,
+        input.attendeeChanges,
+      );
+      await this.updateMeetingFields(client, meetingId, input, changed);
       const meeting = await this.find('id', creatorId, meetingId, client);
       if (!meeting) throw unavailable();
       commitStarted = true;
@@ -775,6 +853,134 @@ export class MeetingModel {
       throw unavailable();
     } finally {
       client.release(discard);
+    }
+  }
+  private async lockEditableMeeting(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    expectedUpdatedAt: string,
+  ): Promise<{ creator_email: string }> {
+    const identity = (
+      await client.query<{ create_request_id: string }>(
+        'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+        [creatorId, meetingId],
+      )
+    ).rows[0];
+    if (!identity) {
+      throw new ApiError(404, 'MEETING_NOT_FOUND');
+    }
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      creatorId + ':' + identity.create_request_id,
+    ]);
+    const locked = await client.query(
+      `SELECT id, updated_at=$3::timestamptz AS matches,
+       (SELECT email FROM users WHERE id=creator_id) AS creator_email
+       FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE`,
+      [creatorId, meetingId, expectedUpdatedAt],
+    );
+    if (!locked.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    if (!locked.rows[0].matches) throw new ApiError(409, 'STALE_MEETING');
+    return locked.rows[0];
+  }
+  private async applyAttendeeChanges(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    creatorEmail: string,
+    changes: MeetingMutation['attendeeChanges'],
+  ): Promise<boolean> {
+    let changed = false;
+    if (changes) {
+      const current = (
+        await client.query<{ email: string; member_id: string | null }>(
+          'SELECT email,member_id FROM meeting_attendees WHERE meeting_id=$1 ORDER BY email',
+          [meetingId],
+        )
+      ).rows;
+      const members = (
+        await client.query<{ id: string; email: string; display_name: string }>(
+          'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
+          [changes.addMemberIds],
+        )
+      ).rows;
+      if (members.length !== changes.addMemberIds.length)
+        throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'ไม่พบสมาชิกที่เลือก' });
+      if (changes.removeEmails.some((email) => !current.some((a) => a.email === email)))
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          removeEmails: 'ไม่พบผู้ร่วมที่เลือกเอาออก',
+        });
+      if (
+        members.some(
+          (m) =>
+            changes.removeEmails.includes(m.email) ||
+            current.some((a) => a.member_id === m.id && changes.removeEmails.includes(a.email)),
+        )
+      )
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          attendeeChanges: 'ไม่สามารถเพิ่มและนำสมาชิกเดียวกันออกพร้อมกัน',
+        });
+      const retained = current.filter((a) => !changes.removeEmails.includes(a.email));
+      const additions = members.filter((m) => !retained.some((a) => a.member_id === m.id));
+      if (additions.some((m) => retained.some((a) => a.email === m.email)))
+        throw new ApiError(400, 'VALIDATION_ERROR', { addMemberIds: 'มีอีเมลนี้ในทีมแล้ว' });
+      if (
+        !retained.some((a) =>
+          a.member_id !== null ? a.member_id !== creatorId : a.email !== creatorEmail,
+        ) &&
+        !additions.some((m) => m.id !== creatorId)
+      )
+        throw new ApiError(400, 'VALIDATION_ERROR', {
+          attendeeChanges: 'เลือกสมาชิกอื่นอย่างน้อยหนึ่งคน',
+        });
+      if (changes.removeEmails.length) {
+        await client.query(
+          'DELETE FROM meeting_attendees WHERE meeting_id=$1 AND email=ANY($2::text[])',
+          [meetingId, changes.removeEmails],
+        );
+        changed = true;
+      }
+      if (additions.length) {
+        await this.insertAttendees(client, meetingId, additions);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+  private async updateMeetingFields(
+    client: PoolClient,
+    meetingId: string,
+    input: MeetingMutation,
+    changed: boolean,
+  ): Promise<void> {
+    const columns = {
+      title: 'title',
+      description: 'description',
+      preparationNotes: 'preparation_notes',
+      candidateName: 'candidate_name',
+      candidateEmail: 'candidate_email',
+      position: 'position',
+      location: 'location',
+      joinUrl: 'manual_join_url',
+      status: 'status',
+    } as const;
+    const values: unknown[] = [meetingId];
+    const sets: string[] = [],
+      differences: string[] = [];
+    for (const [key, column] of Object.entries(columns)) {
+      const value = input[key as keyof typeof columns];
+      if (value === undefined) continue;
+      values.push(value);
+      sets.push(`${column}=$${values.length}`);
+      differences.push(`${column} IS DISTINCT FROM $${values.length}`);
+    }
+    if (sets.length || changed) {
+      await client.query(
+        `UPDATE meetings SET ${sets.length ? sets.join(',') + ',' : ''}
+        updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
+        WHERE id=$1 AND (${changed ? 'true' : differences.join(' OR ')})`,
+        values,
+      );
     }
   }
   private async insertAttendees(

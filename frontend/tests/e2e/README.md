@@ -34,7 +34,7 @@ Run both browser engines serially:
 E2E_BROWSERS=chromium,webkit npm --prefix frontend run test:e2e
 ```
 
-The full selection defines 27 scenarios per browser: 9 auth/session cases, 13 meeting/content/navigation cases, and 5 authorization/private-note cases. `test:e2e:local` remains an alias of the same entry point.
+The full selection defines 28 scenarios per browser: 9 auth/session cases, 14 meeting/content/navigation cases, and 5 authorization/private-note cases. `test:e2e:local` remains an alias of the same entry point.
 
 Run the tagged critical selection in both engines:
 
@@ -44,7 +44,7 @@ E2E_PROFILE=critical E2E_BROWSERS=chromium,webkit npm --prefix frontend run test
 
 `E2E_PROFILE` defaults to `full` locally. Critical selection uses explicit `tags: ["@critical"]` metadata on the existing cases; folders stay organized by feature. This project uses Playwright's browser library with a custom runner, not `@playwright/test`, so `--grep @critical` is not the command. The runner strips metadata before creating browser contexts and executes the same test bodies. Full runs omit tag filtering. Unknown profiles, missing/duplicate inventory IDs, and empty selections fail.
 
-The eight tagged cases per engine are:
+The nine tagged cases per engine are:
 
 | Critical case                              | Core behavior                                                                                |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -52,11 +52,12 @@ The eight tagged cases per engine are:
 | `E2E-AUTH-03-mobile-logout-and-reload`     | Touch logout, cleared/expired session cookies, server 401 and protected reload.              |
 | `E2E-MEMBER-01`                            | Team selection/removal and real member pagination through 20, 40 and 55 results.             |
 | `E2E-CREATE-ONSITE`, `E2E-CREATE-ONLINE`   | Both create formats, persisted meeting/team data and reload.                                 |
+| `E2E-CREATE-PENDING`                       | Held first create POST; repeated native input sends once and persists one meeting/team.       |
 | `E2E-EDIT-01`                              | Persisted title/status/team changes and preparation text after reload.                       |
 | `E2E-DELETE-01`                            | Confirmed deletion and dependent records removed; the old URL is inaccessible.               |
 | `E2E-NAVIGATION-01`                        | Held authenticated route loading, persistent shell, Back/Forward and completion.             |
 
-The existing Frontend CI also retains its seven controlled-response navigation checks in Chromium and six create/edit picker mouse/touch/keyboard cases in each browser, including held responses and repeated disabled Load more activation from PR #18. These focused regressions exercise timing and focus contracts; the real-stack tagged cases verify persisted outcomes. They are complementary and are not duplicated into a second E2E foundation.
+The existing Frontend CI also retains its seven controlled-response navigation checks in Chromium and nine picker cases in each browser (six create/edit mouse/touch/keyboard cases and three date-close/member-input ordering cases), including held responses and repeated disabled Load more activation from PR #18. These focused regressions exercise timing and focus contracts; the real-stack tagged cases verify persisted outcomes. They are complementary and are not duplicated into a second E2E foundation.
 
 Check selection without starting Docker or a browser:
 
@@ -187,7 +188,7 @@ These names must be confirmed from the final run's checks. Branch-protection/rul
    gh run watch RUN_ID --exit-status
    ```
 
-2. Confirm the run's head SHA matches the release candidate, the manifests say `full` with no suite/case filter, and all 27 cases passed in each engine (54 total). Confirm cleanup succeeded and the ordinary frontend/backend checks are green on the same candidate. A critical run alone is not a full-release signoff. If the candidate changes, run full again.
+2. Confirm the run's head SHA matches the release candidate, the manifests say `full` with no suite/case filter, and all 28 cases passed in each engine (56 total). Confirm cleanup succeeded and the ordinary frontend/backend checks are green on the same candidate. A critical run alone is not a full-release signoff. If the candidate changes, run full again.
 3. Before the new workflow is present on the default branch, GitHub does not offer `workflow_dispatch` for it. Use the `e2e:full` PR label for full CI validation of this draft instead; this does not authorize merging or deploying. See [GitHub's manual-run prerequisite](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
 Local equivalent, after clearing debug filters:
@@ -197,7 +198,7 @@ unset E2E_SUITE E2E_CASE
 E2E_PROFILE=full E2E_BROWSERS=chromium,webkit npm --prefix frontend run test:e2e
 ```
 
-Record actual run timestamps and per-browser execution durations; setup/build/queue time is part of pipeline duration. Do not infer a fixed time from selecting eight cases: stack builds and browser installation still occur. The PR report records measured critical and full runs for the submitted commit.
+Record actual run timestamps and per-browser execution durations; setup/build/queue time is part of pipeline duration. Do not infer a fixed time from selecting nine cases: stack builds and browser installation still occur. The PR report records measured critical and full runs for the submitted commit.
 
 ### Railway deployment gate
 
@@ -208,6 +209,42 @@ Both jobs use an owned loopback PostgreSQL container and generated application s
 On failure, the workflow uploads only password-masked PNG screenshots, redacted `results.json` files, and the safe `run.json` manifest, if produced, as `e2e-<browser>-failure`, retained for three days. Traces, fixture files, and private runtime logs are not CI artifacts. Open the workflow run in GitHub Actions to see job status and download available failure evidence. The runner also prints each already-redacted scenario result to the job log. Browser-launch failures record only the stage, error name, and script line; earlier startup failures can occur before any scenario artifact exists.
 
 These workflow definitions are not execution evidence by themselves. Inspect the run for the submitted commit and both browser-job conclusions. Required merge checks depend on the repository’s branch-protection settings.
+
+## Native keyboard profile
+
+The pending-create and member-picker keyboard tests select a fixed native navigation
+profile from the host platform and browser **before** interacting with the app:
+
+| Host/browser | Profile | Forward navigation |
+| --- | --- | --- |
+| macOS + Playwright WebKit | `macos-webkit-option-tab` | Option+Tab (`Alt+Tab` in Playwright) |
+| Chromium and the existing non-macOS profiles | `standard-tab` | Tab |
+
+This Mac/WebKit combination skips native links/buttons with plain Tab. The selected
+gesture is explicit; a failed application assertion never switches the profile,
+retries with another key, or repairs focus programmatically. No system or browser
+preferences are changed, and no extra environment configuration is required.
+
+Before the affected scenarios, an isolated native HTML form must prove that the
+selected key reaches a link and enabled submit button, Enter submits once, and the
+next traversal skips a disabled button. A mismatch fails with
+`Native keyboard preflight failed` before application interaction. Inspect the
+reported host/engine/profile and keyboard-navigation configuration; do not bypass
+it with a forced click or by weakening the scenario's focus assertion.
+
+Run profile selection and native-browser preflight regressions independently:
+
+```sh
+PICKER_BROWSERS=chromium,webkit npm --prefix frontend run test:keyboard-profile
+```
+
+These checks cover touch/non-touch contexts, fail-closed behavior for an incompatible
+key, and context cleanup on success/failure. `test:member-picker` runs them first,
+so the existing Frontend CI includes them without workflow changes. The real-stack
+`E2E-CREATE-PENDING` case also runs the preflight using its touch-enabled context
+configuration. Its focus, Enter submission, request-count, disabled-control,
+request-body and persistence assertions remain intact. These preflights are test
+infrastructure coverage, not additional real-stack scenario PASS counts.
 
 ## Evidence scopes
 
@@ -250,6 +287,7 @@ Implemented in [`meetings.browser.mjs`](meetings.browser.mjs) and [`authorizatio
 | `E2E-LIST-01`                            | Date-filtered list requests the next server page, uses server totals, asserts exact ordered IDs without duplicates across the final partial page, and resets for an empty date.          | Real stack                                              |
 | `E2E-MEMBER-01`                          | Member search loads 20, 40, then all 55 distinct seeded matches, removes the exhausted load-more control, replaces results for a new query, and adds/removes a selection.                | Real stack                                              |
 | `E2E-CREATE-ONSITE`, `E2E-CREATE-ONLINE` | Required input validation; both meeting formats persist and survive reload; online links require HTTPS and retain their stored destination.                                              | Real stack                                              |
+| `E2E-CREATE-PENDING`                     | The first real create POST is held before forwarding; repeated mouse/touch and keyboard input leaves one request, unchanged form/body and no meeting/team writes until release, then one matching requestId and exact team persist through reload. | Injected request timing; real persistence |
 | `E2E-CREATE-RECOVERY`                    | A successful backend create whose response is lost is recovered without creating a second meeting.                                                                                       | Injected loss after a real commit                       |
 | `E2E-EDIT-01`                            | Creator changes title/preparation details and replaces team membership, with database verification and persisted values after reload.                                                    | Real stack                                              |
 | `E2E-CANCEL-01`                          | Dismissing cancellation preserves the meeting; confirming persists Cancelled status and updates available actions.                                                                       | Real stack                                              |
@@ -264,6 +302,8 @@ Implemented in [`meetings.browser.mjs`](meetings.browser.mjs) and [`authorizatio
 | `E2E-AUTHZ-01`                           | An attendee can read the allowed detail but lacks creator controls; forged edit/team/cancel/delete requests are rejected without database changes.                                       | Real stack                                              |
 | `E2E-AUTHZ-02`                           | An outsider cannot read protected meeting/private note data.                                                                                                                             | Real stack                                              |
 | `E2E-AUTHZ-NOTE-01`                      | Forged foreign-author note query/body input is rejected without changing saved notes.                                                                                                    | Real stack                                              |
+
+`E2E-CREATE-PENDING` starts saving with its verified native keyboard profile and Enter on the enabled Save button. While pending, physical mouse/touch hits and Enter/Space respect native disabled controls; some engines move focus to the document body, so these keys are not claimed to submit an enabled form again. The case proves frontend suppression by counting outbound POSTs before and after release. It does not prove backend concurrent-request idempotency; `E2E-CREATE-RECOVERY` and the backend integration tests cover separate recovery/idempotency contracts. The timing gate is always released and its route removed in `finally`; the suite owns context cleanup.
 
 The application supports feedback create/read/update, with removal when its meeting is deleted. It exposes no standalone feedback-delete action; the suite does not invent one to label the flow “CRUD.”
 

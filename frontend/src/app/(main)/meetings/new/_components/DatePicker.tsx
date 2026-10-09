@@ -65,7 +65,11 @@ export function DatePicker({
           onChange={onChange}
           onClose={() => {
             setOpen(false);
-            requestAnimationFrame(() => trigger.current?.focus());
+            requestAnimationFrame(() => {
+              // Closing may leave focus on body; never override a later interaction.
+              if (document.activeElement === document.body)
+                trigger.current?.focus();
+            });
           }}
         />
       )}

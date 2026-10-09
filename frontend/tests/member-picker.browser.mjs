@@ -1,6 +1,10 @@
 // Actual production forms with controlled synthetic API responses, not backend E2E.
 import assert from "node:assert/strict";
 import { chromium, webkit } from "playwright";
+import {
+  nativeKeyboardProfile,
+  verifyNativeKeyboard,
+} from "./native-keyboard.mjs";
 
 const origin = process.env.FE_TEST_ORIGIN ?? "http://127.0.0.1:3100";
 assert.ok(["localhost", "127.0.0.1"].includes(new URL(origin).hostname));
@@ -72,8 +76,17 @@ for (const engine of engines) {
       : {}),
   });
   try {
+    const keyboard = nativeKeyboardProfile(engine);
+    await verifyNativeKeyboard(browser, keyboard);
     for (const view of ["create", "edit"]) {
-      for (const mode of ["mouse", "touch", "keyboard"]) {
+      for (const mode of [
+        "mouse",
+        "touch",
+        "keyboard",
+        ...(view === "create"
+          ? ["date-before-input", "date-after-input", "date-after-response"]
+          : []),
+      ]) {
         const name = `${engine} ${view} ${mode}`;
         const context = await browser.newContext(
           mode === "touch"
@@ -162,6 +175,69 @@ for (const engine of engines) {
             name: "Title",
             exact: true,
           });
+          if (mode.startsWith("date-")) {
+            stage = mode;
+            const trigger = page.getByRole("textbox", {
+              name: "End date", exact: true,
+            });
+            await trigger.click();
+            const calendar = page.getByRole("dialog", { name: "Choose date" });
+            await calendar.locator("button[data-date]:not([disabled])").first().click();
+            // Hold only frames scheduled during this close action. No timing sleep or focus repair.
+            await page.evaluate(() => {
+              const original = window.requestAnimationFrame;
+              window.dateCloseFrames = [];
+              window.restoreDateFrameScheduler = () => {
+                window.requestAnimationFrame = original;
+              };
+              window.requestAnimationFrame = (callback) =>
+                original.call(window, (time) => {
+                  window.dateCloseFrames.push(() => callback(time));
+                });
+            });
+            await calendar.getByRole("button", { name: "Apply", exact: true }).click();
+            await calendar.waitFor({ state: "detached" });
+            await page.evaluate(() => window.restoreDateFrameScheduler());
+            await page.waitForFunction(() => window.dateCloseFrames.length > 0);
+            const releaseFocus = () =>
+              page.evaluate(() => {
+                window.dateCloseFrames.splice(0).forEach((callback) => callback());
+              });
+            const responseGate = deferred();
+            gates.set(1, responseGate);
+            if (mode === "date-before-input") {
+              await releaseFocus();
+              assert.equal(
+                await trigger.evaluate((input) => document.activeElement === input),
+                true,
+              );
+            }
+            await search.click();
+            await search.fill("Synthetic Member");
+            await check(() => assert.deepEqual(calls, [1]));
+            if (mode === "date-after-input") await releaseFocus();
+            responseGate.resolve();
+            await check(async () => assert.equal(await options.count(), 20));
+            if (mode === "date-after-response") await releaseFocus();
+            // Let the released frame's React blur updates commit before asserting visibility.
+            await page.evaluate(() =>
+              new Promise((resolve) => requestAnimationFrame(resolve)),
+            );
+            assert.equal(
+              await search.evaluate((input) => document.activeElement === input),
+              true,
+              "A stale date-close frame must preserve intentional member input focus",
+            );
+            assert.equal(await search.getAttribute("aria-expanded"), "true");
+            assert.equal(await options.count(), 20);
+            await options.first().click();
+            await page.getByRole("button", {
+              name: "Remove Synthetic Member 01", exact: true,
+            }).waitFor();
+            assert.deepEqual(errors, []);
+            console.log(`PASS ${name}: date-close ordering preserves focus, visible results and selection`);
+            continue;
+          }
           await search.fill("Synthetic Member");
           await check(async () => assert.equal(await options.count(), 20));
           await search.evaluate((input) => {
@@ -190,11 +266,11 @@ for (const engine of engines) {
             const gate = deferred();
             gates.set(number, gate);
             if (mode === "keyboard") {
-              await page.keyboard.press("Tab");
+              await page.keyboard.press(keyboard.nextKey);
               assert.equal(
                 await loadMore.count(),
                 1,
-                "Natural Tab keeps Load more reachable",
+                "Native keyboard traversal keeps Load more reachable",
               );
               assert.equal(await search.getAttribute("aria-expanded"), "true");
               // Chromium may include the scrollable listbox in native tab order.
@@ -203,13 +279,13 @@ for (const engine of engines) {
                   .getByRole("listbox", { name: "Company members" })
                   .evaluate((listbox) => document.activeElement === listbox)
               )
-                await page.keyboard.press("Tab");
+                await page.keyboard.press(keyboard.nextKey);
               assert.equal(
                 await loadMore.evaluate(
                   (button) => document.activeElement === button,
                 ),
                 true,
-                "Natural Tab reaches Load more",
+                "Native keyboard traversal reaches Load more",
               );
               await page.keyboard.press(number === 2 ? "Enter" : "Space");
             } else if (mode === "touch") await loadMore.tap();
