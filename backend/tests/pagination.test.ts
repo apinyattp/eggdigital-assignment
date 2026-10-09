@@ -361,6 +361,134 @@ describe('SQL page query boundaries', () => {
     expect(client.query).toHaveBeenLastCalledWith('COMMIT');
     expect(client.release).toHaveBeenCalledOnce();
   });
+  it.each([undefined, '2026-10-08T02:59:59.999999Z'])(
+    'keeps current-time evidence separate from reference-time pages and previews (%s)',
+    async (previousReferenceTime) => {
+      const { MeetingModel } = await import('../src/models/meeting.model.js');
+      const currentTime = '2026-10-08T03:00:00.000000Z';
+      const referenceTime = previousReferenceTime ?? currentTime;
+      const row = (id: string) => ({
+        id,
+        candidate: { name: 'Candidate', email: 'private@example.test' },
+        startsAt: '2026-10-08T02:00:00.000000Z',
+        endsAt: '2026-10-08T03:00:00.000000Z',
+        attendees: [],
+        organizer: { id: user.id, displayName: user.displayName },
+      });
+      const client = {
+        query: vi
+          .fn()
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [{ time: currentTime }] })
+          .mockResolvedValueOnce({
+            rows: [
+              {
+                current_total: '17',
+                rejected_total: '9',
+                past_total: '11',
+                fingerprint: 'digest',
+              },
+            ],
+          })
+          .mockResolvedValueOnce({ rows: [row('current-first'), row('current-second')] })
+          .mockResolvedValueOnce({ rows: [row('rejected-first'), row('rejected-second')] })
+          .mockResolvedValueOnce({ rows: [row('past-first'), row('past-second')] })
+          .mockResolvedValueOnce({ rows: [] }),
+        release: vi.fn(),
+      };
+      const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+      const result = await new MeetingModel(pool as never).readSnapshot(
+        user,
+        '2026-10-08',
+        10,
+        20,
+        previousReferenceTime,
+      );
+      expect(result.referenceTime).toBe(referenceTime);
+      expect(result.fingerprint).toBe('digest');
+      expect(pool.connect).toHaveBeenCalledOnce();
+      expect(pool.query).not.toHaveBeenCalled();
+      expect(client.query).toHaveBeenCalledTimes(7);
+      const calls = client.query.mock.calls;
+      expect(calls[0]).toEqual(['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY']);
+      expect(calls[2][0]).toContain("WHEN m.ends_at > $4::timestamptz THEN 'upcomingCurrent'");
+      expect(calls[2][1]).toEqual([user.id, user.email, '2026-10-08', currentTime]);
+      expect(calls[3][0]).toContain('ORDER BY m.starts_at,m.id LIMIT $5 OFFSET $6');
+      expect(calls[3][1]).toEqual([user.id, user.email, '2026-10-08', referenceTime, 10, 20]);
+      expect(calls[4][0]).toContain(
+        "m.status IN ('REJECTED','CANCELLED') ORDER BY m.ends_at DESC,m.id LIMIT $4",
+      );
+      expect(calls[4][1]).toEqual([user.id, user.email, '2026-10-08', 5]);
+      expect(calls[5][0]).toContain('m.ends_at <= $4::timestamptz');
+      expect(calls[5][0]).toContain('ORDER BY m.ends_at DESC,m.id LIMIT $5');
+      expect(calls[5][1]).toEqual([user.id, user.email, '2026-10-08', referenceTime, 5]);
+      for (const [sql] of calls.slice(2, 6)) {
+        expect(sql).toContain('(m.creator_id=$1 OR EXISTS');
+        expect(sql).toContain('(a.member_id=$1 OR (a.member_id IS NULL AND a.email=$2))');
+        expect(sql).toContain("m.starts_at >= ($3::date::timestamp AT TIME ZONE 'Asia/Bangkok')");
+        expect(sql).toContain(
+          "m.starts_at < (($3::date+1)::timestamp AT TIME ZONE 'Asia/Bangkok')",
+        );
+      }
+      for (const [name, total, ids] of [
+        ['upcomingCurrent', 17, ['current-first', 'current-second']],
+        ['rejectedCancelled', 9, ['rejected-first', 'rejected-second']],
+        ['past', 11, ['past-first', 'past-second']],
+      ] as const) {
+        expect(result.groups[name].total).toBe(total);
+        expect(result.groups[name].items.map((item) => item.id)).toEqual(ids);
+        for (const item of result.groups[name].items) {
+          expect(item.candidate).toEqual({ name: 'Candidate' });
+          expect(item.startsAt).toBe('2026-10-08T02:00:00.000Z');
+        }
+      }
+      expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+    },
+  );
+  it.each([
+    ['evidence', 2, false],
+    ['current page', 3, false],
+    ['rejected preview', 4, false],
+    ['past preview', 5, false],
+    ['failed rollback', 4, true],
+  ] as const)(
+    'rolls back and releases the snapshot client after %s fails',
+    async (_stage, failedIndex, rollbackFails) => {
+      const { MeetingModel } = await import('../src/models/meeting.model.js');
+      const client = {
+        query: vi.fn(async (sql: string) => {
+          if (sql === 'ROLLBACK') {
+            if (rollbackFails) throw new Error('rollback failed');
+            return { rows: [] };
+          }
+          if (client.query.mock.calls.length - 1 === failedIndex) throw new Error('read failed');
+          if (sql.includes('transaction_timestamp'))
+            return { rows: [{ time: '2026-10-08T03:00:00.000000Z' }] };
+          if (sql.includes('WITH scoped'))
+            return {
+              rows: [
+                { current_total: '0', rejected_total: '0', past_total: '0', fingerprint: 'digest' },
+              ],
+            };
+          return { rows: [] };
+        }),
+        release: vi.fn(),
+      };
+      await expect(
+        new MeetingModel({ connect: async () => client } as never).readSnapshot(
+          user,
+          '2026-10-08',
+          10,
+          0,
+        ),
+      ).rejects.toMatchObject({ status: 503, code: 'DEPENDENCY_UNAVAILABLE' });
+      expect(client.query).toHaveBeenCalledTimes(failedIndex + 2);
+      expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(client.query).not.toHaveBeenCalledWith('COMMIT');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(rollbackFails);
+    },
+  );
   it('uses the same meeting and asOf filter after Member access for feedback count and rows', async () => {
     const { MeetingModel } = await import('../src/models/meeting.model.js');
     const client = {
