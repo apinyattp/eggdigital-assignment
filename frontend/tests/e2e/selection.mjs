@@ -1,5 +1,5 @@
 export const SUITES = Object.freeze(["auth", "meetings", "authorization"]);
-export const EXPECTED_COUNTS = Object.freeze({ full: 27, critical: 8 });
+export const EXPECTED_COUNTS = Object.freeze({ full: 28, critical: 9 });
 const caseId = /^E2E-[A-Za-z0-9_-]+$/;
 
 function uniqueIds(ids, label) {

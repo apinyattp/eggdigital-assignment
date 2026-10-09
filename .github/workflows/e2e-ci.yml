@@ -2,7 +2,7 @@ name: Real-stack E2E
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, refactor-sql]
     types: [opened, synchronize, reopened, edited, labeled]
   push:
     branches: [main]
