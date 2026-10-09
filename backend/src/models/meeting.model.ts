@@ -304,31 +304,20 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const existing = (
-        await client.query(
-          `SELECT content,updated_at=$3::timestamptz AS matches FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
-          [meetingId, authorKey, expectedUpdatedAt],
-        )
-      ).rows[0];
+      const existing = await this.readOwnNoteVersion(
+        client,
+        meetingId,
+        authorKey,
+        expectedUpdatedAt,
+      );
       if (!existing) {
         if (expectedUpdatedAt !== null) throw new ApiError(409, 'NOTE_CHANGED');
-        await client.query(
-          'INSERT INTO interview_notes(meeting_id,author_key,content) VALUES($1,$2,$3)',
-          [meetingId, authorKey, text],
-        );
+        await this.insertOwnNote(client, meetingId, authorKey, text);
       } else if (existing.content !== text) {
         if (!existing.matches) throw new ApiError(409, 'NOTE_CHANGED');
-        await client.query(
-          "UPDATE interview_notes SET content=$3,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2",
-          [meetingId, authorKey, text],
-        );
+        await this.updateOwnNote(client, meetingId, authorKey, text);
       }
-      const note = (
-        await client.query<NoteView>(
-          `SELECT content AS text,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt" FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
-          [meetingId, authorKey],
-        )
-      ).rows[0]!;
+      const note = await this.readSavedOwnNote(client, meetingId, authorKey);
       commitStarted = true;
       await client.query('COMMIT');
       return note;
@@ -345,6 +334,49 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async readOwnNoteVersion(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    expectedUpdatedAt: string | null,
+  ) {
+    return (
+      await client.query(
+        `SELECT content,updated_at=$3::timestamptz AS matches FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
+        [meetingId, authorKey, expectedUpdatedAt],
+      )
+    ).rows[0];
+  }
+  private async insertOwnNote(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    text: string,
+  ) {
+    await client.query(
+      'INSERT INTO interview_notes(meeting_id,author_key,content) VALUES($1,$2,$3)',
+      [meetingId, authorKey, text],
+    );
+  }
+  private async updateOwnNote(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    text: string,
+  ) {
+    await client.query(
+      "UPDATE interview_notes SET content=$3,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2",
+      [meetingId, authorKey, text],
+    );
+  }
+  private async readSavedOwnNote(client: PoolClient, meetingId: string, authorKey: string) {
+    return (
+      await client.query<NoteView>(
+        `SELECT content AS text,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt" FROM interview_notes WHERE meeting_id=$1 AND author_key=$2`,
+        [meetingId, authorKey],
+      )
+    ).rows[0]!;
   }
   async readFeedback(
     user: UserView,

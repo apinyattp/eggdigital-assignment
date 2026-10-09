@@ -946,6 +946,183 @@ describe('S1 TEST-MM-022/027/041 HTTP identity and envelope', () => {
   });
 });
 
+describe('Own-note save query contracts (mocked pg client, not real DB)', () => {
+  const authorKey = 'member:' + user.id;
+  const version = '2026-10-08T03:00:00.000001Z';
+  const text = '  private\n  ';
+  function database(
+    options: {
+      existing?: { content: string; matches: boolean | null };
+      text?: string;
+      missingMeeting?: boolean;
+      denied?: boolean;
+      fault?: 'version' | 'insert' | 'update' | 'readback' | 'commit';
+      rollbackFails?: boolean;
+    } = {},
+  ) {
+    const note = { text: options.text ?? text, updatedAt: version };
+    const query = vi.fn(async (sql: string, _values?: unknown[]) => {
+      if (sql === 'ROLLBACK' && options.rollbackFails) throw new Error('private rollback detail');
+      if (
+        (options.fault === 'version' && sql.startsWith('SELECT content,updated_at=')) ||
+        (options.fault === 'insert' && sql.startsWith('INSERT INTO interview_notes')) ||
+        (options.fault === 'update' && sql.startsWith('UPDATE interview_notes')) ||
+        (options.fault === 'readback' && sql.startsWith('SELECT content AS text')) ||
+        (options.fault === 'commit' && sql === 'COMMIT')
+      )
+        throw new Error('private SQL detail');
+      if (sql.startsWith('SELECT id FROM meetings'))
+        return { rows: options.missingMeeting ? [] : [{ id: stored.id }] };
+      if (sql.startsWith('SELECT m.id FROM meetings'))
+        return { rows: options.denied ? [] : [{ id: stored.id }] };
+      if (sql.startsWith('SELECT content,updated_at='))
+        return { rows: options.existing ? [options.existing] : [] };
+      if (sql.startsWith('SELECT content AS text')) return { rows: [note] };
+      return { rows: [] };
+    });
+    const client = { query, release: vi.fn() };
+    const pool = { connect: vi.fn().mockResolvedValue(client), query: vi.fn() };
+    return { model: new MeetingModel(pool as never), pool, client, note };
+  }
+  it.each([
+    { name: 'new empty note', content: '', existing: undefined, expected: null, write: 'INSERT' },
+    {
+      name: 'changed verbatim note',
+      content: text,
+      existing: { content: 'Before', matches: true },
+      expected: version,
+      write: 'UPDATE',
+    },
+    {
+      name: 'same-content null-version retry',
+      content: text,
+      existing: { content: text, matches: null },
+      expected: null,
+      write: null,
+    },
+    {
+      name: 'same-content stale-version retry',
+      content: text,
+      existing: { content: text, matches: false },
+      expected: version,
+      write: null,
+    },
+  ])(
+    'preserves ordered author-scoped queries for $name',
+    async ({ content, existing, expected, write }) => {
+      const { model, pool, client, note } = database({ existing, text: content });
+      expect(await model.saveOwnNote(user, stored.id, authorKey, content, expected)).toBe(note);
+      const calls = client.query.mock.calls;
+      expect(calls[0]).toEqual(['BEGIN']);
+      expect(calls[1]).toEqual(['SELECT id FROM meetings WHERE id=$1 FOR UPDATE', [stored.id]]);
+      expect(calls[2][0]).toContain('m.creator_id=$1 OR EXISTS');
+      expect(calls[2][0]).toContain('(a.member_id=$1 OR (a.member_id IS NULL AND a.email=$2))');
+      expect(calls[2][1]).toEqual([user.id, user.email, stored.id]);
+      expect(calls[3]).toEqual([
+        'SELECT content,updated_at=$3::timestamptz AS matches FROM interview_notes WHERE meeting_id=$1 AND author_key=$2',
+        [stored.id, authorKey, expected],
+      ]);
+      const writes = calls.filter(([sql]) => /^(INSERT|UPDATE)/.test(sql));
+      expect(writes).toHaveLength(write ? 1 : 0);
+      if (write) {
+        expect(calls[4]).toBe(writes[0]);
+        expect(writes[0][0]).toMatch(new RegExp('^' + write + '.*interview_notes'));
+        expect(writes[0][1]).toEqual([stored.id, authorKey, content]);
+        if (write === 'UPDATE')
+          expect(writes[0][0]).toContain(
+            "updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')",
+          );
+      }
+      const readback = calls[write ? 5 : 4];
+      expect(readback[0]).toContain('SELECT content AS text,to_char(updated_at');
+      expect(readback[0]).toContain('WHERE meeting_id=$1 AND author_key=$2');
+      expect(readback[1]).toEqual([stored.id, authorKey]);
+      expect(calls).toHaveLength(write ? 7 : 6);
+      expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+      expect(pool.connect).toHaveBeenCalledOnce();
+      expect(pool.query).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    {
+      name: 'missing meeting',
+      options: { missingMeeting: true },
+      expected: null,
+      status: 404,
+      code: 'MEETING_NOT_FOUND',
+      calls: 3,
+    },
+    {
+      name: 'permission lost after parent lock',
+      options: { denied: true },
+      expected: null,
+      status: 404,
+      code: 'MEETING_NOT_FOUND',
+      calls: 4,
+    },
+    {
+      name: 'missing note with non-null version',
+      options: {},
+      expected: version,
+      status: 409,
+      code: 'NOTE_CHANGED',
+      calls: 5,
+    },
+    {
+      name: 'different content with stale version',
+      options: { existing: { content: 'Before', matches: false } },
+      expected: version,
+      status: 409,
+      code: 'NOTE_CHANGED',
+      calls: 5,
+    },
+  ])(
+    'stops before note writes/readback for $name',
+    async ({ options, expected, status, code, calls }) => {
+      const { model, pool, client } = database(options);
+      await expect(
+        model.saveOwnNote(user, stored.id, authorKey, text, expected),
+      ).rejects.toMatchObject({ status, code });
+      expect(client.query).toHaveBeenCalledTimes(calls);
+      expect(
+        client.query.mock.calls.some(([sql]) =>
+          /^(INSERT|UPDATE|SELECT content AS text)/.test(sql),
+        ),
+      ).toBe(false);
+      expect(client.query).not.toHaveBeenCalledWith('COMMIT');
+      expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+      expect(pool.query).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ['version', false],
+    ['insert', false],
+    ['update', false],
+    ['readback', false],
+    ['commit', false],
+    ['version', true],
+  ] as const)(
+    'maps %s failure and preserves client cleanup (rollback failure=%s)',
+    async (fault, rollbackFails) => {
+      const existing = fault === 'update' ? { content: 'Before', matches: true } : undefined;
+      const { model, pool, client } = database({ existing, fault, rollbackFails });
+      const result = model.saveOwnNote(user, stored.id, authorKey, text, existing ? version : null);
+      await expect(result).rejects.toMatchObject({ status: 503, code: 'DEPENDENCY_UNAVAILABLE' });
+      await expect(result).rejects.not.toThrow('private');
+      expect(client.query.mock.calls.filter(([sql]) => sql === 'COMMIT')).toHaveLength(
+        fault === 'commit' ? 1 : 0,
+      );
+      expect(client.query.mock.calls.filter(([sql]) => sql === 'ROLLBACK')).toHaveLength(
+        fault === 'commit' ? 0 : 1,
+      );
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(fault === 'commit' || rollbackFails);
+      expect(pool.connect).toHaveBeenCalledOnce();
+      expect(pool.query).not.toHaveBeenCalled();
+    },
+  );
+});
 describe('Confirmed Add temporal and separate-field amendments', () => {
   it.each([
     ['2026-10-07T23:59:59+07:00', '2026-10-08T11:00:00+07:00'],
