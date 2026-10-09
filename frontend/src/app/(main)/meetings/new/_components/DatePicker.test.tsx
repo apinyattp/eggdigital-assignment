@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { DatePicker } from "./DatePicker";
 
 beforeEach(() => {
@@ -337,5 +338,82 @@ describe("Date picker repeated rendering", () => {
     expect(formatting).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(onChange).toHaveBeenCalledExactlyOnceWith("2028-03-01");
+  });
+});
+
+describe("Date picker close focus ownership", () => {
+  it.each(["Apply", "Cancel", "Escape", "backdrop"])(
+    "restores focus after %s, but preserves an intentional next input interaction",
+    async (action) => {
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      const user = userEvent.setup();
+      render(
+        <>
+          {picker("2026-10-10", "2026-10-08", vi.fn())}
+          <label htmlFor="next-input">Next input</label>
+          <input id="next-input" />
+        </>,
+      );
+      const trigger = screen.getByLabelText("End date");
+      const next = screen.getByLabelText("Next input");
+      const close = async () => {
+        trigger.focus();
+        await user.keyboard("{Enter}");
+        if (action === "Escape") {
+          // jsdom does not implement the native dialog Escape default action.
+          fireEvent(
+            screen.getByRole("dialog"),
+            new Event("cancel", { bubbles: true, cancelable: true }),
+          );
+        } else if (action === "backdrop") {
+          fireEvent.click(screen.getByRole("dialog"));
+        } else {
+          await user.click(screen.getByRole("button", { name: action }));
+        }
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        expect(frames).toHaveLength(1);
+      };
+      const restore = () =>
+        act(() => frames.splice(0).forEach((callback) => callback(0)));
+
+      // Ordinary keyboard close still restores the trigger before the next interaction.
+      await close();
+      restore();
+      expect(trigger).toHaveFocus();
+      await user.click(next);
+      await user.keyboard("first");
+      expect(next).toHaveFocus();
+      expect(next).toHaveValue("first");
+
+      // Reverse the ordering: the stale frame must not steal the user's new focus.
+      await close();
+      await user.click(next);
+      await user.keyboard(" second");
+      restore();
+      expect(next).toHaveFocus();
+      expect(next).toHaveValue("first second");
+    },
+  );
+
+  it("does not move focus out of a calendar reopened before the close frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    render(picker("2026-10-10", "2026-10-08", vi.fn()));
+    fireEvent.click(screen.getByLabelText("End date"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByLabelText("End date"));
+    const day = screen.getByRole("button", {
+      name: "Saturday, 10 October 2026",
+    });
+    expect(day).toHaveFocus();
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(day).toHaveFocus();
   });
 });

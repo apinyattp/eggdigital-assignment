@@ -57,7 +57,7 @@ The nine tagged cases per engine are:
 | `E2E-DELETE-01`                            | Confirmed deletion and dependent records removed; the old URL is inaccessible.               |
 | `E2E-NAVIGATION-01`                        | Held authenticated route loading, persistent shell, Back/Forward and completion.             |
 
-The existing Frontend CI also retains its seven controlled-response navigation checks in Chromium and six create/edit picker mouse/touch/keyboard cases in each browser, including held responses and repeated disabled Load more activation from PR #18. These focused regressions exercise timing and focus contracts; the real-stack tagged cases verify persisted outcomes. They are complementary and are not duplicated into a second E2E foundation.
+The existing Frontend CI also retains its seven controlled-response navigation checks in Chromium and nine picker cases in each browser (six create/edit mouse/touch/keyboard cases and three date-close/member-input ordering cases), including held responses and repeated disabled Load more activation from PR #18. These focused regressions exercise timing and focus contracts; the real-stack tagged cases verify persisted outcomes. They are complementary and are not duplicated into a second E2E foundation.
 
 Check selection without starting Docker or a browser:
 
