@@ -333,42 +333,17 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const access = await client.query(
-        `SELECT m.id FROM meetings m WHERE m.id=$3 AND ${this.readPredicate()}`,
-        [user.id, user.email, meetingId],
+      await this.authorizeFeedbackRead(client, user, meetingId);
+      const page = await this.readFeedbackPage(
+        client,
+        meetingId,
+        authorKey,
+        pageSize,
+        offset,
+        previousAsOf,
       );
-      if (!access.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      const own = (
-        await client.query<{ id: string }>(
-          'SELECT id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
-          [meetingId, authorKey],
-        )
-      ).rows[0];
-      const asOf =
-        previousAsOf ??
-        ((
-          await client.query(
-            `SELECT to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS time`,
-          )
-        ).rows[0].time as string);
-      const visibility = `meeting_id=$1 AND created_at <= $3::timestamptz`;
-      const parameters = [meetingId, authorKey, asOf];
-      const total = Number(
-        (
-          await client.query(
-            `SELECT count(*) AS total FROM meeting_feedback WHERE meeting_id=$1 AND created_at <= $2::timestamptz`,
-            [meetingId, asOf],
-          )
-        ).rows[0].total,
-      );
-      const rows = (
-        await client.query<FeedbackView>(
-          `${feedbackProjection} WHERE ${visibility} ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`,
-          [...parameters, pageSize, offset],
-        )
-      ).rows;
       await client.query('COMMIT');
-      return { rows, ownFeedbackId: own?.id ?? null, total, asOf };
+      return page;
     } catch (error) {
       try {
         await client.query('ROLLBACK');
@@ -399,12 +374,7 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const own = (
-        await client.query<{ id: string; create_request_id: string }>(
-          'SELECT id,create_request_id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
-          [meetingId, authorKey],
-        )
-      ).rows[0];
+      const own = await this.findFeedbackRequest(client, meetingId, authorKey);
       let id: string,
         created = false;
       if (own) {
@@ -415,18 +385,17 @@ export class MeetingModel {
         const text = validateNewContent();
         id = randomUUID();
         created = true;
-        await client.query(
-          'INSERT INTO meeting_feedback(id,meeting_id,author_key,author_name,create_request_id,content) VALUES($1,$2,$3,$4,$5,$6)',
-          [id, meetingId, authorKey, user.displayName, requestId, text],
-        );
-      }
-      const feedback = (
-        await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
+        await this.insertFeedback(
+          client,
+          id,
           meetingId,
           authorKey,
-          id,
-        ])
-      ).rows[0]!;
+          user.displayName,
+          requestId,
+          text,
+        );
+      }
+      const feedback = await this.readFeedbackById(client, meetingId, authorKey, id);
       commitStarted = true;
       await client.query('COMMIT');
       return { created, feedback };
@@ -463,27 +432,19 @@ export class MeetingModel {
     try {
       await client.query('BEGIN');
       await this.lockContentMeeting(client, user, meetingId);
-      const own = (
-        await client.query(
-          `SELECT content,updated_at=$4::timestamptz AS matches FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2 AND id=$3`,
-          [meetingId, authorKey, feedbackId, expectedUpdatedAt],
-        )
-      ).rows[0];
+      const own = await this.readEditableFeedback(
+        client,
+        meetingId,
+        authorKey,
+        feedbackId,
+        expectedUpdatedAt,
+      );
       if (!own) throw new ApiError(404, 'FEEDBACK_NOT_FOUND');
       if (own.content !== text) {
         if (!own.matches) throw new ApiError(409, 'FEEDBACK_CHANGED');
-        await client.query(
-          "UPDATE meeting_feedback SET content=$4,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2 AND id=$3",
-          [meetingId, authorKey, feedbackId, text],
-        );
+        await this.updateFeedbackContent(client, meetingId, authorKey, feedbackId, text);
       }
-      const feedback = (
-        await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
-          meetingId,
-          authorKey,
-          feedbackId,
-        ])
-      ).rows[0]!;
+      const feedback = await this.readFeedbackById(client, meetingId, authorKey, feedbackId);
       commitStarted = true;
       await client.query('COMMIT');
       return feedback;
@@ -500,6 +461,118 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async authorizeFeedbackRead(
+    client: PoolClient,
+    user: UserView,
+    meetingId: string,
+  ): Promise<void> {
+    const access = await client.query(
+      `SELECT m.id FROM meetings m WHERE m.id=$3 AND ${this.readPredicate()}`,
+      [user.id, user.email, meetingId],
+    );
+    if (!access.rows.length) throw new ApiError(404, 'MEETING_NOT_FOUND');
+  }
+  private async readFeedbackPage(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    pageSize: number,
+    offset: number,
+    previousAsOf?: string,
+  ) {
+    const own = (
+      await client.query<{ id: string }>(
+        'SELECT id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
+        [meetingId, authorKey],
+      )
+    ).rows[0];
+    const asOf =
+      previousAsOf ??
+      ((
+        await client.query(
+          `SELECT to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS time`,
+        )
+      ).rows[0].time as string);
+    const visibility = `meeting_id=$1 AND created_at <= $3::timestamptz`;
+    const parameters = [meetingId, authorKey, asOf];
+    const total = Number(
+      (
+        await client.query(
+          `SELECT count(*) AS total FROM meeting_feedback WHERE meeting_id=$1 AND created_at <= $2::timestamptz`,
+          [meetingId, asOf],
+        )
+      ).rows[0].total,
+    );
+    const rows = (
+      await client.query<FeedbackView>(
+        `${feedbackProjection} WHERE ${visibility} ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`,
+        [...parameters, pageSize, offset],
+      )
+    ).rows;
+    return { rows, ownFeedbackId: own?.id ?? null, total, asOf };
+  }
+  private async findFeedbackRequest(client: PoolClient, meetingId: string, authorKey: string) {
+    return (
+      await client.query<{ id: string; create_request_id: string }>(
+        'SELECT id,create_request_id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
+        [meetingId, authorKey],
+      )
+    ).rows[0];
+  }
+  private async insertFeedback(
+    client: PoolClient,
+    id: string,
+    meetingId: string,
+    authorKey: string,
+    authorName: string,
+    requestId: string,
+    text: string,
+  ): Promise<void> {
+    await client.query(
+      'INSERT INTO meeting_feedback(id,meeting_id,author_key,author_name,create_request_id,content) VALUES($1,$2,$3,$4,$5,$6)',
+      [id, meetingId, authorKey, authorName, requestId, text],
+    );
+  }
+  private async readEditableFeedback(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    feedbackId: string,
+    expectedUpdatedAt: string,
+  ) {
+    return (
+      await client.query<{ content: string; matches: boolean }>(
+        `SELECT content,updated_at=$4::timestamptz AS matches FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2 AND id=$3`,
+        [meetingId, authorKey, feedbackId, expectedUpdatedAt],
+      )
+    ).rows[0];
+  }
+  private async updateFeedbackContent(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    feedbackId: string,
+    text: string,
+  ): Promise<void> {
+    await client.query(
+      "UPDATE meeting_feedback SET content=$4,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE meeting_id=$1 AND author_key=$2 AND id=$3",
+      [meetingId, authorKey, feedbackId, text],
+    );
+  }
+  private async readFeedbackById(
+    client: PoolClient,
+    meetingId: string,
+    authorKey: string,
+    id: string,
+  ): Promise<FeedbackView> {
+    return (
+      await client.query<FeedbackView>(`${feedbackProjection} WHERE meeting_id=$1 AND id=$3`, [
+        meetingId,
+        authorKey,
+        id,
+      ])
+    ).rows[0]!;
   }
   async findSummary(user: UserView, meetingId: string) {
     try {
