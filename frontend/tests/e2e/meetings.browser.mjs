@@ -516,8 +516,19 @@ await runSuite("meetings", async ({ run }) => {
           `/api/v1/meetings/${fixture.meetings.onsite.id}/feedback`,
     );
     await dialog.getByRole("button", { name: "Save Feedback" }).click();
-    const original = (await createdRequest).postDataJSON();
-    await page.getByText("E2E original feedback", { exact: true }).waitFor();
+    const originalRequest = await createdRequest;
+    const original = originalRequest.postDataJSON();
+    const createdResponse = await originalRequest.response();
+    assert.ok(createdResponse);
+    assert.equal(createdResponse.status(), 201);
+    const created = await createdResponse.json();
+    assert.equal(created.feedback.text, "E2E original feedback");
+    await dialog.waitFor({ state: "hidden" });
+    // The editor textarea also matches this text before the POST completes.
+    await page
+      .locator(`[data-feedback-id="${created.feedback.id}"]`)
+      .getByText("E2E original feedback", { exact: true })
+      .waitFor();
     const replay = await page.evaluate(
       async ({ id, body }) => {
         const response = await fetch(`/api/v1/meetings/${id}/feedback`, {
