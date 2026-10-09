@@ -430,6 +430,166 @@ describe('batched attendee writes (mocked pg client, not real DB)', () => {
     expect(client.query.mock.calls.some(([sql]) => sql.startsWith('INSERT'))).toBe(false);
   });
 });
+describe('mutation transaction contracts (mocked pg client, not real DB)', () => {
+  const member = { id: attendee, email: 'sample02@example.test', display_name: 'Sample 02' };
+  function database(
+    options: {
+      missing?: 'identity' | 'locked';
+      stale?: boolean;
+      unknownMember?: boolean;
+      fault?: 'readback' | 'commit';
+      rollbackFails?: boolean;
+    } = {},
+  ) {
+    const client = {
+      query: vi.fn(async (sql: string, _values?: unknown[]) => {
+        if (sql === 'COMMIT' && options.fault === 'commit')
+          throw new Error('private commit detail');
+        if (sql === 'ROLLBACK' && options.rollbackFails) throw new Error('private rollback detail');
+        if (sql.startsWith('SELECT create_request_id'))
+          return {
+            rows: options.missing === 'identity' ? [] : [{ create_request_id: draft().requestId }],
+          };
+        if (sql.startsWith('SELECT id, updated_at'))
+          return {
+            rows:
+              options.missing === 'locked'
+                ? []
+                : [{ id: stored.id, matches: !options.stale, creator_email: user.email }],
+          };
+        if (sql.startsWith('SELECT email,member_id')) return { rows: [] };
+        if (sql.startsWith('SELECT id,email,display_name'))
+          return { rows: options.unknownMember ? [] : [member] };
+        if (sql.startsWith('SELECT m.id')) {
+          if (options.fault === 'readback') throw new Error('private readback detail');
+          return { rows: [stored] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+    return { client, pool, model: new MeetingModel(pool as never) };
+  }
+  const change = () => ({
+    expectedUpdatedAt: stored.updatedAt,
+    attendeeChanges: { addMemberIds: [attendee], removeEmails: [] },
+  });
+  const writes = (client: ReturnType<typeof database>['client']) =>
+    client.query.mock.calls.filter(([sql]) => /^(INSERT|UPDATE|DELETE)/.test(sql));
+
+  it('keeps creator checks, advisory lock, row lock, user locks and readback on one client in order', async () => {
+    const { client, pool, model } = database();
+    expect(await model.mutate(memberId, stored.id, change())).toEqual(stored);
+    const calls = client.query.mock.calls;
+    expect(calls[0]).toEqual(['BEGIN']);
+    expect(calls[1]).toEqual([
+      'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+      [memberId, stored.id],
+    ]);
+    expect(calls[2]).toEqual([
+      'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+      [memberId + ':' + draft().requestId],
+    ]);
+    expect(calls[3]).toEqual([
+      expect.stringContaining('WHERE creator_id=$1 AND id=$2 FOR UPDATE'),
+      [memberId, stored.id, stored.updatedAt],
+    ]);
+    const memberRead = calls.findIndex(([sql]) => sql.startsWith('SELECT id,email,display_name'));
+    expect(memberRead).toBeGreaterThan(3);
+    expect(calls[memberRead]).toEqual([
+      expect.stringContaining('ORDER BY id FOR SHARE'),
+      [[attendee]],
+    ]);
+    expect(calls.at(-2)).toEqual([
+      expect.stringContaining('WHERE m.creator_id=$1 AND m.id=$2'),
+      [memberId, stored.id],
+    ]);
+    expect(calls.at(-1)).toEqual(['COMMIT']);
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(pool.query).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it.each(['identity', 'locked'] as const)(
+    'returns creator-scoped404 when %s disappears before any writes',
+    async (missing) => {
+      const { client, model } = database({ missing });
+      await expect(model.mutate(memberId, stored.id, change())).rejects.toMatchObject({
+        status: 404,
+        code: 'MEETING_NOT_FOUND',
+      });
+      expect(writes(client)).toEqual([]);
+      expect(
+        client.query.mock.calls.some(([sql]) => sql.startsWith('SELECT email,member_id')),
+      ).toBe(false);
+      expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+    },
+  );
+
+  it('rejects a stale version before treating an empty mutation as a no-op', async () => {
+    const { client, model } = database({ stale: true });
+    await expect(
+      model.mutate(memberId, stored.id, { expectedUpdatedAt: stored.updatedAt }),
+    ).rejects.toMatchObject({ status: 409, code: 'STALE_MEETING' });
+    expect(writes(client)).toEqual([]);
+    expect(client.query.mock.calls.some(([sql]) => sql.startsWith('SELECT m.id'))).toBe(false);
+    expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it('advances the version for an attendee-only change without inventing detail updates', async () => {
+    const { client, model } = database();
+    await model.mutate(memberId, stored.id, change());
+    const updates = client.query.mock.calls.filter(([sql]) => sql.startsWith('UPDATE meetings'));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]![0]).toContain(
+      "updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')",
+    );
+    expect(updates[0]![0]).toContain('WHERE id=$1 AND (true)');
+    expect(updates[0]![0]).not.toMatch(/title=|description=|status=/);
+    expect(updates[0]![1]).toEqual([stored.id]);
+  });
+
+  it.each([false, true])(
+    'preserves validation error and rolls back before detail/team writes (rollback failure=%s)',
+    async (rollbackFails) => {
+      const { client, model } = database({ unknownMember: true, rollbackFails });
+      await expect(
+        model.mutate(memberId, stored.id, { ...change(), title: 'Must not persist' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        fields: { addMemberIds: expect.any(String) },
+      });
+      expect(writes(client)).toEqual([]);
+      expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(rollbackFails);
+    },
+  );
+
+  it.each(['readback', 'commit'] as const)(
+    'maps %s failure without leaking details and discards only ambiguous commit',
+    async (fault) => {
+      const { client, pool, model } = database({ fault });
+      const mutation = model.mutate(memberId, stored.id, change());
+      await expect(mutation).rejects.toMatchObject({
+        status: 503,
+        code: 'DEPENDENCY_UNAVAILABLE',
+      });
+      await expect(mutation).rejects.not.toThrow('private');
+      expect(writes(client).length).toBeGreaterThan(0);
+      expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(fault !== 'commit');
+      expect(client.query.mock.calls.filter(([sql]) => sql === 'COMMIT')).toHaveLength(
+        fault === 'commit' ? 1 : 0,
+      );
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(fault === 'commit');
+      expect(pool.connect).toHaveBeenCalledOnce();
+      expect(pool.query).not.toHaveBeenCalled();
+    },
+  );
+});
 describe('S1 TEST-MM-020 model fault handling (mocked pg client, not real DB)', () => {
   it.each(['members', 'attendees', 'readback', 'commit'])(
     'fault at %s releases same client and maps safely',
