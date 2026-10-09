@@ -541,52 +541,19 @@ export class MeetingModel {
       const scope = `${this.readPredicate()}
         AND m.starts_at >= ($3::date::timestamp AT TIME ZONE 'Asia/Bangkok')
         AND m.starts_at < (($3::date+1)::timestamp AT TIME ZONE 'Asia/Bangkok')`;
-      // PostgreSQL returns only counts and one digest for change detection, never the full dataset.
-      // Current-time grouping in the digest detects meetings crossing their end boundary.
-      const evidence = (
-        await client.query(
-          `WITH scoped AS (
-          ${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer,
-          CASE WHEN m.status IN ('REJECTED','CANCELLED') THEN 'rejectedCancelled'
-            WHEN m.ends_at > $4::timestamptz THEN 'upcomingCurrent' ELSE 'past' END AS section
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-        ) SELECT count(*) FILTER (WHERE section='upcomingCurrent') AS current_total,
-          count(*) FILTER (WHERE section='rejectedCancelled') AS rejected_total,
-          count(*) FILTER (WHERE section='past') AS past_total,
-          md5(COALESCE(string_agg(row_to_json(scoped)::text, '' ORDER BY id),'')) AS fingerprint FROM scoped`,
-          [user.id, user.email, date, currentTime],
-        )
-      ).rows[0];
-      const upcoming = (
-        await client.query(
-          `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at > $4::timestamptz
-          ORDER BY m.starts_at,m.id LIMIT $5 OFFSET $6`,
-          [user.id, user.email, date, referenceTime, pageSize, offset],
-        )
-      ).rows;
-      const rejected = currentOnly
-        ? []
-        : (
-            await client.query(
-              `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status IN ('REJECTED','CANCELLED') ORDER BY m.ends_at DESC,m.id LIMIT $4`,
-              [user.id, user.email, date, 5],
-            )
-          ).rows;
-      const past = currentOnly
-        ? []
-        : (
-            await client.query(
-              `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
-          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
-          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at <= $4::timestamptz
-          ORDER BY m.ends_at DESC,m.id LIMIT $5`,
-              [user.id, user.email, date, referenceTime, 5],
-            )
-          ).rows;
+      const evidence = await this.readSnapshotEvidence(client, user, date, scope, currentTime);
+      const upcoming = await this.readSnapshotCurrentPage(
+        client,
+        user,
+        date,
+        scope,
+        referenceTime,
+        pageSize,
+        offset,
+      );
+      const { rejected, past } = currentOnly
+        ? { rejected: [], past: [] }
+        : await this.readSnapshotPreviews(client, user, date, scope, referenceTime);
       await client.query('COMMIT');
       return {
         referenceTime,
@@ -616,6 +583,75 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async readSnapshotEvidence(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    currentTime: string,
+  ) {
+    // PostgreSQL returns only counts and one digest for change detection, never the full dataset.
+    // Current-time grouping in the digest detects meetings crossing their end boundary.
+    return (
+      await client.query(
+        `WITH scoped AS (
+          ${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer,
+          CASE WHEN m.status IN ('REJECTED','CANCELLED') THEN 'rejectedCancelled'
+            WHEN m.ends_at > $4::timestamptz THEN 'upcomingCurrent' ELSE 'past' END AS section
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+        ) SELECT count(*) FILTER (WHERE section='upcomingCurrent') AS current_total,
+          count(*) FILTER (WHERE section='rejectedCancelled') AS rejected_total,
+          count(*) FILTER (WHERE section='past') AS past_total,
+          md5(COALESCE(string_agg(row_to_json(scoped)::text, '' ORDER BY id),'')) AS fingerprint FROM scoped`,
+        [user.id, user.email, date, currentTime],
+      )
+    ).rows[0];
+  }
+  private async readSnapshotCurrentPage(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    referenceTime: string,
+    pageSize: number,
+    offset: number,
+  ) {
+    return (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at > $4::timestamptz
+          ORDER BY m.starts_at,m.id LIMIT $5 OFFSET $6`,
+        [user.id, user.email, date, referenceTime, pageSize, offset],
+      )
+    ).rows;
+  }
+  private async readSnapshotPreviews(
+    client: PoolClient,
+    user: UserView,
+    date: string,
+    scope: string,
+    referenceTime: string,
+  ) {
+    const rejected = (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status IN ('REJECTED','CANCELLED') ORDER BY m.ends_at DESC,m.id LIMIT $4`,
+        [user.id, user.email, date, 5],
+      )
+    ).rows;
+    const past = (
+      await client.query(
+        `${this.projection}, json_build_object('id',u.id,'displayName',u.display_name) AS organizer
+          FROM meetings m JOIN users u ON u.id=m.creator_id WHERE ${scope}
+          AND m.status NOT IN ('REJECTED','CANCELLED') AND m.ends_at <= $4::timestamptz
+          ORDER BY m.ends_at DESC,m.id LIMIT $5`,
+        [user.id, user.email, date, referenceTime, 5],
+      )
+    ).rows;
+    return { rejected, past };
   }
   private readPredicate() {
     return `(m.creator_id=$1 OR EXISTS(SELECT 1 FROM meeting_attendees a WHERE a.meeting_id=m.id AND
