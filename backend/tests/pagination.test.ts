@@ -685,3 +685,86 @@ describe('bounded page sizes and totalPages metadata', () => {
     expect(h.model.readSnapshot).not.toHaveBeenCalled();
   });
 });
+
+describe('feedback page SQL extraction contracts', () => {
+  it.each([undefined, '2026-10-08T03:00:00.000001Z'])(
+    'keeps own identity, timestamp, count and page reads on one client with asOf=%s',
+    async (previousAsOf) => {
+      const { MeetingModel } = await import('../src/models/meeting.model.js');
+      const asOf = previousAsOf ?? '2026-10-09T03:00:00.123456Z';
+      const row = {
+        id: 'feedback',
+        text: 'Saved',
+        author: { displayName: 'Author' },
+        isOwn: true,
+        createdAt: asOf,
+        updatedAt: asOf,
+      };
+      const client = {
+        query: vi.fn(async (sql: string, _values?: unknown[]) => ({
+          rows: sql.startsWith('SELECT m.id')
+            ? [{ id: stored.id }]
+            : sql.startsWith('SELECT id FROM meeting_feedback')
+              ? [{ id: row.id }]
+              : sql.startsWith('SELECT to_char')
+                ? [{ time: asOf }]
+                : sql.startsWith('SELECT count(*)')
+                  ? [{ total: '51' }]
+                  : sql.startsWith('SELECT id,content')
+                    ? [row]
+                    : [],
+        })),
+        release: vi.fn(),
+      };
+      const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+      const authorKey = 'member:' + user.id;
+      await expect(
+        new MeetingModel(pool as never).readFeedback(
+          user,
+          stored.id,
+          authorKey,
+          50,
+          50,
+          previousAsOf,
+        ),
+      ).resolves.toEqual({ rows: [row], ownFeedbackId: row.id, total: 51, asOf });
+      const calls = client.query.mock.calls;
+      expect(calls[0]).toEqual(['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY']);
+      expect(calls[1]![1]).toEqual([user.id, user.email, stored.id]);
+      expect(calls[2]).toEqual([
+        'SELECT id FROM meeting_feedback WHERE meeting_id=$1 AND author_key=$2',
+        [stored.id, authorKey],
+      ]);
+      expect(calls.filter(([sql]) => sql.startsWith('SELECT to_char'))).toHaveLength(
+        previousAsOf ? 0 : 1,
+      );
+      expect(calls.at(-3)).toEqual([
+        expect.stringContaining('created_at <= $2::timestamptz'),
+        [stored.id, asOf],
+      ]);
+      expect(calls.at(-2)).toEqual([
+        expect.stringContaining('ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5'),
+        [stored.id, authorKey, asOf, 50, 50],
+      ]);
+      expect(calls.at(-1)).toEqual(['COMMIT']);
+      expect(pool.query).not.toHaveBeenCalled();
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+    },
+  );
+  it('does not read feedback identity or counts after access is denied', async () => {
+    const { MeetingModel } = await import('../src/models/meeting.model.js');
+    const client = { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() };
+    await expect(
+      new MeetingModel({ connect: async () => client } as never).readFeedback(
+        user,
+        stored.id,
+        'member:' + user.id,
+        50,
+        0,
+      ),
+    ).rejects.toMatchObject({ status: 404, code: 'MEETING_NOT_FOUND' });
+    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+});
