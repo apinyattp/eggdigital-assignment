@@ -34,8 +34,8 @@ const inventory = SUITES.flatMap((suite) => {
 const select = (env, cases = inventory) =>
   selectCases(cases, readSelectionRequest(env));
 
-test("default full preserves all27 cases and critical tags select the agreed8", () => {
-  assert.equal(select({}).length, 27);
+test("default full preserves all28 cases and critical tags select the agreed9", () => {
+  assert.equal(select({}).length, 28);
   assert.deepEqual(
     select({ E2E_PROFILE: "critical" }).map(({ id }) => id),
     [
@@ -44,6 +44,7 @@ test("default full preserves all27 cases and critical tags select the agreed8", 
       "E2E-MEMBER-01",
       "E2E-CREATE-ONSITE",
       "E2E-CREATE-ONLINE",
+      "E2E-CREATE-PENDING",
       "E2E-EDIT-01",
       "E2E-DELETE-01",
       "E2E-NAVIGATION-01",
@@ -96,7 +97,7 @@ test("unknown profiles, suites and missing or wrong-suite case IDs fail", () => 
   );
 });
 test("missing scenarios/tags and duplicate scenario IDs cannot silently shrink coverage", () => {
-  assert.throws(() => select({}, inventory.slice(1)), /27 cases/);
+  assert.throws(() => select({}, inventory.slice(1)), /28 cases/);
   assert.throws(
     () =>
       select(
@@ -105,7 +106,7 @@ test("missing scenarios/tags and duplicate scenario IDs cannot silently shrink c
           index === 0 ? { ...entry, tags: [] } : entry,
         ),
       ),
-    /8 @critical/,
+    /9 @critical/,
   );
   assert.throws(
     () => select({}, [inventory[0], ...inventory.slice(0, -1)]),

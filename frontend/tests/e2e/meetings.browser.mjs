@@ -274,6 +274,187 @@ await runSuite("meetings", async ({ run }) => {
   }
 
   await run(
+    "E2E-CREATE-PENDING",
+    async ({ page, fixture, origin }) => {
+      await login(page, fixture.accounts.owner);
+      await page.goto(`${origin}/meetings/new`);
+      await fillMeeting(page, fixture, "E2E pending create");
+      const before = await inspectFixture();
+      const form = page.locator("form");
+      const formValues = () =>
+        form
+          .locator("input, textarea, select")
+          .evaluateAll((fields) =>
+            fields.map((field) => ({ id: field.id, value: field.value })),
+          );
+      const originalValues = await formValues();
+      const posts = [];
+      const routeErrors = [];
+      const routeTasks = [];
+      let originalBody;
+      let release;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const isCreate = (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/meetings";
+      const observe = (request) => {
+        if (isCreate(request)) posts.push(request);
+      };
+      const pattern = "**/api/v1/meetings";
+      const handler = (route) => {
+        const task = (async () => {
+          try {
+            if (isCreate(route.request()) && originalBody === undefined) {
+              originalBody = route.request().postData();
+              await gate;
+            }
+            // The real first POST is forwarded unchanged only after assertions.
+            await route.continue();
+          } catch (error) {
+            routeErrors.push(error);
+            await route.abort().catch(() => {});
+          }
+        })();
+        routeTasks.push(task);
+        return task;
+      };
+      page.on("request", observe);
+      await page.route(pattern, handler);
+      try {
+        // Natural keyboard traversal reaches the enabled submit button before
+        // saving. Once locked, native disabled controls cannot be focused again.
+        await page
+          .getByLabel("Preparation Notes", { exact: true })
+          .press("Tab");
+        const save = page.getByRole("button", {
+          name: "Save Meeting",
+          exact: true,
+        });
+        const saveFocused = () =>
+          save.evaluate((button) => button === document.activeElement);
+        for (let tab = 1; tab < 6 && !(await saveFocused()); tab++)
+          await page.keyboard.press("Tab");
+        assert.equal(await saveFocused(), true, "Native Tab reaches Save");
+        await page.keyboard.press("Enter");
+        const pending = page.getByRole("button", {
+          name: "Saving…",
+          exact: true,
+        });
+        await pending.waitFor();
+        await check(async () => {
+          assert.equal(posts.length, 1);
+          assert.equal(typeof originalBody, "string");
+          assert.equal(await pending.isDisabled(), true);
+          assert.equal(await form.getAttribute("aria-busy"), "true");
+        });
+        const payload = JSON.parse(originalBody);
+        assert.match(payload.requestId, /^[0-9a-f-]{36}$/);
+        assert.equal(payload.title, "E2E pending create");
+        assert.deepEqual(payload.attendeeMemberIds, [
+          fixture.accounts.attendee.id,
+        ]);
+        // Raw physical input does not auto-wait for enabled state or bypass the
+        // browser's disabled semantics as force-click/dispatchEvent would.
+        for (let repeat = 0; repeat < 2; repeat++) {
+          await pending.scrollIntoViewIfNeeded();
+          const box = await pending.boundingBox();
+          assert.ok(box, "Pending submit remains visible");
+          const x = box.x + box.width / 2;
+          const y = box.y + box.height / 2;
+          await page.mouse.click(x, y);
+          await page.touchscreen.tap(x, y);
+          await page.keyboard.press("Enter");
+          await page.keyboard.press("Space");
+        }
+        assert.equal(await pending.isDisabled(), true);
+        assert.equal(await form.getAttribute("aria-busy"), "true");
+        assert.deepEqual(await formValues(), originalValues);
+        const held = await inspectFixture();
+        assert.deepEqual(
+          held.meetings,
+          before.meetings,
+          "No meeting write before gate release",
+        );
+        assert.deepEqual(
+          held.attendees,
+          before.attendees,
+          "No attendee write before gate release",
+        );
+        assert.equal(
+          posts.length,
+          1,
+          "Frontend suppresses repeated pending submissions",
+        );
+        assert.deepEqual(
+          posts.map((request) => request.postData()),
+          [originalBody],
+        );
+        assert.deepEqual(routeErrors, []);
+        const response = page.waitForResponse((response) =>
+          isCreate(response.request()),
+        );
+        release();
+        const savedResponse = await response;
+        assert.equal(savedResponse.ok(), true);
+        assert.equal(savedResponse.request().postData(), originalBody);
+        await page.waitForURL(/\/meetings\/[0-9a-f-]+$/);
+        await page
+          .getByRole("heading", { name: "Candidate profile" })
+          .waitFor();
+        const id = new URL(page.url()).pathname.split("/").pop();
+        const saved = await inspectFixture();
+        assert.equal(saved.meetings.length, before.meetings.length + 1);
+        const matches = saved.meetings.filter(
+          (meeting) => meeting.requestId === payload.requestId,
+        );
+        assert.equal(matches.length, 1);
+        assert.equal(matches[0].id, id);
+        assert.equal(matches[0].creatorId, fixture.accounts.owner.id);
+        for (const key of [
+          "title",
+          "format",
+          "candidateName",
+          "candidateEmail",
+          "status",
+        ])
+          assert.equal(matches[0][key], payload[key]);
+        for (const key of ["startsAt", "endsAt"])
+          assert.equal(Date.parse(matches[0][key]), Date.parse(payload[key]));
+        assert.deepEqual(
+          saved.attendees.filter((row) => row.meetingId === id),
+          [
+            {
+              meetingId: id,
+              memberId: fixture.accounts.attendee.id,
+              email: fixture.accounts.attendee.email,
+            },
+          ],
+        );
+        assert.equal(saved.attendees.length, before.attendees.length + 1);
+        await page.reload();
+        await page
+          .getByRole("heading", { name: "Candidate profile" })
+          .waitFor();
+        assert.equal(posts.length, 1);
+        const reloaded = await inspectFixture();
+        assert.deepEqual(reloaded.meetings, saved.meetings);
+        assert.deepEqual(reloaded.attendees, saved.attendees);
+        assert.deepEqual(routeErrors, []);
+      } finally {
+        release();
+        await page.unroute(pattern, handler);
+        await Promise.all(routeTasks);
+        page.off("request", observe);
+        // runSuite closes this owned context even if an assertion failed.
+      }
+    },
+    { tags: ["@critical"], hasTouch: true },
+    "real local stack; first create POST held before forwarding; native repeated input",
+  );
+
+  await run(
     "E2E-CREATE-RECOVERY",
     async ({ page, fixture, origin }) => {
       await login(page, fixture.accounts.owner);
