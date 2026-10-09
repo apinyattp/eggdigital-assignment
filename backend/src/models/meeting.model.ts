@@ -113,38 +113,10 @@ export class MeetingModel {
         return { created: false, meeting: existing };
       }
 
-      const members = (
-        await client.query<{ id: string; email: string; display_name: string }>(
-          'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
-          [input.attendeeMemberIds],
-        )
-      ).rows;
-      if (members.length !== input.attendeeMemberIds.length)
-        throw new ApiError(400, 'VALIDATION_ERROR', { attendeeMemberIds: 'ไม่พบสมาชิกที่เลือก' });
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,manual_join_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id`,
-        [
-          randomUUID(),
-          creatorId,
-          input.requestId,
-          input.title,
-          input.description,
-          input.candidateName,
-          input.candidateEmail,
-          input.position,
-          input.startsAt,
-          input.endsAt,
-          input.status,
-          input.format,
-          input.location,
-          input.preparationNotes,
-          input.joinUrl ?? null,
-        ],
-      );
-      const created = inserted.rows.length === 1;
-      if (created) await this.insertAttendees(client, inserted.rows[0]!.id, members);
+      const members = await this.lockCreateAttendees(client, input.attendeeMemberIds);
+      const inserted = await this.insertMeeting(client, creatorId, input);
+      const created = inserted.length === 1;
+      if (created) await this.insertAttendees(client, inserted[0]!.id, members);
       // The next READ COMMITTED statement sees a concurrent committed winner.
       const meeting = await this.find('create_request_id', creatorId, input.requestId, client);
       if (!meeting) throw unavailable();
@@ -168,6 +140,42 @@ export class MeetingModel {
       client.release(discardClient);
     }
   }
+  private async lockCreateAttendees(client: PoolClient, attendeeMemberIds: string[]) {
+    const members = (
+      await client.query<{ id: string; email: string; display_name: string }>(
+        'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
+        [attendeeMemberIds],
+      )
+    ).rows;
+    if (members.length !== attendeeMemberIds.length)
+      throw new ApiError(400, 'VALIDATION_ERROR', { attendeeMemberIds: 'ไม่พบสมาชิกที่เลือก' });
+    return members;
+  }
+  private async insertMeeting(client: PoolClient, creatorId: string, input: NewMeeting) {
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO meetings (id,creator_id,create_request_id,title,description,candidate_name,candidate_email,position,starts_at,ends_at,status,format,location,preparation_notes,manual_join_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id`,
+      [
+        randomUUID(),
+        creatorId,
+        input.requestId,
+        input.title,
+        input.description,
+        input.candidateName,
+        input.candidateEmail,
+        input.position,
+        input.startsAt,
+        input.endsAt,
+        input.status,
+        input.format,
+        input.location,
+        input.preparationNotes,
+        input.joinUrl ?? null,
+      ],
+    );
+    return inserted.rows;
+  }
   async deleteMeeting(
     creatorId: string,
     meetingId: string,
@@ -183,34 +191,13 @@ export class MeetingModel {
     let discard = false;
     try {
       await client.query('BEGIN');
-      // Read identity first, then take operation-key -> row locks in the same order as create.
-      const found = (
-        await client.query<{ create_request_id: string }>(
-          'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
-          [creatorId, meetingId],
-        )
-      ).rows[0];
-      if (!found) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        creatorId + ':' + found.create_request_id,
-      ]);
-      const locked = (
-        await client.query(
-          'SELECT updated_at=$3::timestamptz AS matches FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE',
-          [creatorId, meetingId, expectedUpdatedAt],
-        )
-      ).rows[0];
-      if (!locked) throw new ApiError(404, 'MEETING_NOT_FOUND');
-      if (!locked.matches) throw new ApiError(409, 'STALE_MEETING');
-      await client.query(
-        'INSERT INTO deleted_meeting_requests(creator_id,create_request_id,meeting_id) VALUES($1,$2,$3)',
-        [creatorId, found.create_request_id, meetingId],
-      );
-      await client.query('DELETE FROM meeting_attendees WHERE meeting_id=$1', [meetingId]);
-      await client.query('DELETE FROM meetings WHERE id=$1 AND creator_id=$2', [
-        meetingId,
+      const requestId = await this.lockMeetingForDeletion(
+        client,
         creatorId,
-      ]);
+        meetingId,
+        expectedUpdatedAt,
+      );
+      await this.deleteMeetingRows(client, creatorId, meetingId, requestId);
       commitStarted = true;
       await client.query('COMMIT');
     } catch (error) {
@@ -226,6 +213,49 @@ export class MeetingModel {
     } finally {
       client.release(discard);
     }
+  }
+  private async lockMeetingForDeletion(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    expectedUpdatedAt: string,
+  ): Promise<string> {
+    // Read identity first, then take operation-key -> row locks in the same order as create.
+    const found = (
+      await client.query<{ create_request_id: string }>(
+        'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+        [creatorId, meetingId],
+      )
+    ).rows[0];
+    if (!found) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      creatorId + ':' + found.create_request_id,
+    ]);
+    const locked = (
+      await client.query(
+        'SELECT updated_at=$3::timestamptz AS matches FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE',
+        [creatorId, meetingId, expectedUpdatedAt],
+      )
+    ).rows[0];
+    if (!locked) throw new ApiError(404, 'MEETING_NOT_FOUND');
+    if (!locked.matches) throw new ApiError(409, 'STALE_MEETING');
+    return found.create_request_id;
+  }
+  private async deleteMeetingRows(
+    client: PoolClient,
+    creatorId: string,
+    meetingId: string,
+    requestId: string,
+  ): Promise<void> {
+    await client.query(
+      'INSERT INTO deleted_meeting_requests(creator_id,create_request_id,meeting_id) VALUES($1,$2,$3)',
+      [creatorId, requestId, meetingId],
+    );
+    await client.query('DELETE FROM meeting_attendees WHERE meeting_id=$1', [meetingId]);
+    await client.query('DELETE FROM meetings WHERE id=$1 AND creator_id=$2', [
+      meetingId,
+      creatorId,
+    ]);
   }
   async getOwnNote(user: UserView, meetingId: string, authorKey: string): Promise<NoteView | null> {
     try {
