@@ -590,6 +590,196 @@ describe('mutation transaction contracts (mocked pg client, not real DB)', () =>
     },
   );
 });
+describe('create and delete transaction stages (mocked pg client, not real DB)', () => {
+  const input = () => ({
+    ...draft(),
+    description: 'Description',
+    preparationNotes: 'Preparation',
+    location: null,
+    status: 'PENDING' as const,
+    format: 'ONLINE' as const,
+    joinUrl: 'https://meet.example.test/room',
+  });
+  it.each([true, false])(
+    'preserves create parameters and winner readback (inserted=%s)',
+    async (inserted) => {
+      let reads = 0;
+      const client = {
+        query: vi.fn(async (sql: string, _values?: unknown[]) => {
+          if (sql.startsWith('SELECT m.id')) return { rows: reads++ ? [stored] : [] };
+          if (sql.startsWith('SELECT id,email,display_name'))
+            return {
+              rows: [{ id: attendee, email: 'sample02@example.test', display_name: 'Sample 02' }],
+            };
+          if (sql.startsWith('INSERT INTO meetings'))
+            return { rows: inserted ? [{ id: stored.id }] : [] };
+          return { rows: [] };
+        }),
+        release: vi.fn(),
+      };
+      const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+      const payload = input();
+      expect(await new MeetingModel(pool as never).create(memberId, payload)).toEqual({
+        created: inserted,
+        meeting: stored,
+      });
+      const calls = client.query.mock.calls;
+      expect(calls[0]).toEqual(['BEGIN ISOLATION LEVEL READ COMMITTED']);
+      expect(calls[1]).toEqual([
+        'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+        [memberId + ':' + payload.requestId],
+      ]);
+      expect(calls[2][0]).toContain('deleted_meeting_requests');
+      expect(calls[2][1]).toEqual([memberId, payload.requestId]);
+      expect(calls[3]).toEqual([
+        'SELECT id,email,display_name FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE',
+        [[attendee]],
+      ]);
+      expect(calls[4][0]).toContain(
+        'ON CONFLICT (creator_id,create_request_id) DO NOTHING RETURNING id',
+      );
+      expect(calls[4][1]).toEqual([
+        expect.stringMatching(/^[0-9a-f-]{36}$/),
+        memberId,
+        payload.requestId,
+        payload.title,
+        payload.description,
+        payload.candidateName,
+        payload.candidateEmail,
+        payload.position,
+        payload.startsAt,
+        payload.endsAt,
+        payload.status,
+        payload.format,
+        payload.location,
+        payload.preparationNotes,
+        payload.joinUrl,
+      ]);
+      const attendeeWrites = calls.filter(([sql]) =>
+        sql.startsWith('INSERT INTO meeting_attendees'),
+      );
+      expect(attendeeWrites).toHaveLength(inserted ? 1 : 0);
+      expect(calls.at(-2)).toEqual([calls[2][0], [memberId, payload.requestId]]);
+      expect(calls.at(-1)).toEqual(['COMMIT']);
+      expect(pool.connect).toHaveBeenCalledOnce();
+      expect(pool.query).not.toHaveBeenCalled();
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+    },
+  );
+  it('rejects a terminal deleted create key before validating or inserting attendees', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => ({
+        rows: sql.startsWith('SELECT m.id') ? [{ deleted: true }] : [],
+      })),
+      release: vi.fn(),
+    };
+    await expect(
+      new MeetingModel({ connect: async () => client } as never).create(memberId, input()),
+    ).rejects.toMatchObject({ status: 410, code: 'MEETING_DELETED' });
+    expect(client.query).toHaveBeenCalledTimes(4);
+    expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+    expect(client.query.mock.calls.some(([sql]) => /^(INSERT|SELECT id,email)/.test(sql))).toBe(
+      false,
+    );
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  function deletion(
+    options: {
+      absent?: 'identity' | 'locked';
+      stale?: boolean;
+      fault?: 'receipt' | 'attendees' | 'parent' | 'commit';
+      rollbackFails?: boolean;
+    } = {},
+  ) {
+    const client = {
+      query: vi.fn(async (sql: string, _values?: unknown[]) => {
+        if (sql === 'ROLLBACK' && options.rollbackFails) throw new Error('private rollback');
+        if (
+          (options.fault === 'receipt' && sql.startsWith('INSERT INTO deleted_meeting_requests')) ||
+          (options.fault === 'attendees' && sql.startsWith('DELETE FROM meeting_attendees')) ||
+          (options.fault === 'parent' && sql.startsWith('DELETE FROM meetings ')) ||
+          (options.fault === 'commit' && sql === 'COMMIT')
+        )
+          throw new Error('private SQL');
+        if (sql.startsWith('SELECT create_request_id'))
+          return {
+            rows: options.absent === 'identity' ? [] : [{ create_request_id: draft().requestId }],
+          };
+        if (sql.startsWith('SELECT updated_at='))
+          return { rows: options.absent === 'locked' ? [] : [{ matches: !options.stale }] };
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client), query: vi.fn() };
+    return { client, pool, model: new MeetingModel(pool as never) };
+  }
+  it('deletes using creator identity, operation lock, version lock, receipt then child/parent order', async () => {
+    const { client, pool, model } = deletion();
+    await model.deleteMeeting(memberId, stored.id, stored.updatedAt);
+    expect(client.query.mock.calls).toEqual([
+      ['BEGIN'],
+      [
+        'SELECT create_request_id FROM meetings WHERE creator_id=$1 AND id=$2',
+        [memberId, stored.id],
+      ],
+      [
+        'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+        [memberId + ':' + draft().requestId],
+      ],
+      [
+        'SELECT updated_at=$3::timestamptz AS matches FROM meetings WHERE creator_id=$1 AND id=$2 FOR UPDATE',
+        [memberId, stored.id, stored.updatedAt],
+      ],
+      [
+        'INSERT INTO deleted_meeting_requests(creator_id,create_request_id,meeting_id) VALUES($1,$2,$3)',
+        [memberId, draft().requestId, stored.id],
+      ],
+      ['DELETE FROM meeting_attendees WHERE meeting_id=$1', [stored.id]],
+      ['DELETE FROM meetings WHERE id=$1 AND creator_id=$2', [stored.id, memberId]],
+      ['COMMIT'],
+    ]);
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(pool.query).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+  it.each(['identity', 'locked', 'stale'] as const)(
+    'rejects delete %s before receipt or row writes',
+    async (stage) => {
+      const { client, model } = deletion(stage === 'stale' ? { stale: true } : { absent: stage });
+      await expect(
+        model.deleteMeeting(memberId, stored.id, stored.updatedAt),
+      ).rejects.toMatchObject({
+        status: stage === 'stale' ? 409 : 404,
+        code: stage === 'stale' ? 'STALE_MEETING' : 'MEETING_NOT_FOUND',
+      });
+      expect(client.query.mock.calls.some(([sql]) => /^(INSERT|DELETE)/.test(sql))).toBe(false);
+      expect(client.query).toHaveBeenLastCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+    },
+  );
+  it.each([
+    ['receipt', false],
+    ['attendees', false],
+    ['parent', false],
+    ['parent', true],
+    ['commit', false],
+  ] as const)(
+    'preserves delete failure handling at %s (rollback fails=%s)',
+    async (fault, rollbackFails) => {
+      const { client, model } = deletion({ fault, rollbackFails });
+      const result = model.deleteMeeting(memberId, stored.id, stored.updatedAt);
+      await expect(result).rejects.toMatchObject({ status: 503, code: 'DEPENDENCY_UNAVAILABLE' });
+      await expect(result).rejects.not.toThrow('private');
+      expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(fault !== 'commit');
+      expect(client.query.mock.calls.filter(([sql]) => sql === 'COMMIT')).toHaveLength(
+        fault === 'commit' ? 1 : 0,
+      );
+      expect(client.release).toHaveBeenCalledExactlyOnceWith(fault === 'commit' || rollbackFails);
+    },
+  );
+});
 describe('S1 TEST-MM-020 model fault handling (mocked pg client, not real DB)', () => {
   it.each(['members', 'attendees', 'readback', 'commit'])(
     'fault at %s releases same client and maps safely',
